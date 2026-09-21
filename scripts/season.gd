@@ -72,6 +72,7 @@ var daynight: Node
 var terrain: Node
 
 var season := 0                 # 0 春 1 夏 2 秋 3 冬
+var season_name: String = "春"  # 供 main.gd / HUD 直接读取的属性（不是方法）
 var day_in_season := 0          # 当季已过天数
 var growth_mult := 1.25
 var weather: String = "clear"
@@ -136,14 +137,15 @@ func _process(dt: float) -> void:
 	if weather_left < 0.0:
 		weather_left = 0.0
 
-	_update_rain(dt)
+	# 雨幕统一由 main.gd 的 GPUParticles3D 负责，本模块的 MultiMesh 雨停用
 	_apply_env(dt)
 
 
 # ============================== 公共接口 ==============================
-func season_name() -> String:
-	var nm: String = SEASON_NAMES[clampi(season, 0, SEASON_COUNT - 1)]
-	return nm
+## 季节名以 season_name 属性对外暴露（由 _commit_season / deserialize 维护），
+## 这里保留同名取值逻辑供内部刷新调用。
+func _refresh_name() -> void:
+	season_name = SEASON_NAMES[clampi(season, 0, SEASON_COUNT - 1)]
 
 
 func days_left_in_season() -> int:
@@ -172,7 +174,7 @@ func advance_days(n: int) -> void:
 func serialize() -> Dictionary:
 	return {
 		"season": season,
-		"season_name": season_name(),
+		"season_name": season_name,
 		"day_in_season": day_in_season,
 		"growth_mult": growth_mult,
 		"weather": weather,
@@ -191,6 +193,7 @@ func deserialize(d: Dictionary) -> void:
 		return
 
 	season = clampi(int(d.get("season", 0)), 0, SEASON_COUNT - 1)
+	_refresh_name()
 	day_in_season = clampi(int(d.get("day_in_season", 0)), 0, DAYS_PER_SEASON - 1)
 	growth_mult = float(d.get("growth_mult", float(GROWTH_MULT[season])))
 
@@ -239,14 +242,15 @@ func _step_day() -> void:
 
 func _commit_season(notify: bool) -> void:
 	season = posmod(season, SEASON_COUNT)
+	_refresh_name()
 	growth_mult = float(GROWTH_MULT[season])
 	var tc: Color = TINT_COL[season]
 	_tint = tc
 	_tint_amount = float(TINT_AMOUNT[season])
 	_apply_terrain_tint()
 	if notify:
-		GameBus.season_changed.emit(season, season_name(), growth_mult)
-		GameBus.toast.emit("入" + season_name() + "了")
+		GameBus.season_changed.emit(season, season_name, growth_mult)
+		GameBus.toast.emit("入" + season_name + "了")
 
 
 func _pick_weather() -> void:
@@ -285,9 +289,7 @@ func _apply_now() -> void:
 	_i_heat = 1.0 if weather == "heat" else 0.0
 	_apply_terrain_tint()
 	_apply_env(0.0)
-	if weather == "rain":
-		_ensure_rain()
-		_update_rain(0.0)
+	# 雨幕统一由 main.gd 的 GPUParticles3D 负责
 
 
 func _apply_terrain_tint() -> void:

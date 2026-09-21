@@ -622,15 +622,17 @@ func _process(dt: float) -> void:
 		hud.set_clock(dn.day_count, dn.clock_string(), dn.speed_scale)
 		hud.set_build(_build_menu_text())
 		if season != null:
-			hud.set_season("%s · 第 %d 天 · %s" % [season.season_name, season.day_in_season, _weather_cn(season.weather)])
+			hud.set_season("%s · 第 %d 天 · %s" % [season.season_name, dn.day_count, _weather_cn(season.weather)])
 
 
 func _weather_cn(w: String) -> String:
 	match w:
+		"clear": return "晴"
 		"sunny": return "晴"
 		"cloudy": return "多云"
 		"rain": return "下雨"
 		"storm": return "暴风雨"
+		"heat": return "热浪"
 	return w
 
 
@@ -744,7 +746,7 @@ func deserialize(d: Dictionary) -> void:
 func _check_auto_shot() -> void:
 	if not OS.get_cmdline_args().has("--auto-shot"):
 		return
-	var base := "C:/Users/a2402/Documents/Code/DinkumTown3D/"
+	var base := _shot_dir()
 
 	await get_tree().create_timer(2.0).timeout
 	await RenderingServer.frame_post_draw
@@ -764,4 +766,28 @@ func _check_auto_shot() -> void:
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(base + "shot3_night.png")
 
+	# 雨天：验证雨幕 + 雾浓度 + 日照衰减的联动
+	if season != null:
+		season.weather = "rain"
+		season._apply_now()
+	_on_weather("rain")
+	dn.time = 0.45
+	player.yaw = 0.80
+	player.pitch = -0.15
+	await get_tree().create_timer(1.6).timeout
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(base + "shot4_rain.png")
+
 	get_tree().quit()
+
+
+## 截图输出目录：默认项目根，可用 --shot-dir <路径> 覆盖
+func _shot_dir() -> String:
+	var args := OS.get_cmdline_args()
+	var di: int = args.find("--shot-dir")
+	if di >= 0 and di + 1 < args.size():
+		var d := args[di + 1]
+		if not d.ends_with("/") and not d.ends_with("\\"):
+			d += "/"
+		return d
+	return "C:/Users/a2402/Documents/Code/DinkumTown3D/"
