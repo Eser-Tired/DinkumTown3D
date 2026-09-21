@@ -1,16 +1,18 @@
 @echo off
-chcp 65001 >nul
+setlocal
+rem ASCII only: cmd.exe parses .bat with the legacy code page, non-ASCII breaks syntax.
 set "PROJ=%~dp0"
 
-rem 优先用项目同级的 Godot（Tools\Godot\Godot.exe），找不到则退回 PATH 里的 godot
+rem Prefer Godot next to the project (..\Tools\Godot\Godot.exe), fall back to PATH.
 set "GODOT=%PROJ%..\Tools\Godot\Godot.exe"
 if not exist "%GODOT%" set "GODOT=godot"
 
-rem 首次运行（或 .godot 缓存被清理后）先导入，否则 class_name 全局类无法解析
+rem First run (or after .godot is deleted) needs an import pass or class_name globals fail.
 if not exist "%PROJ%.godot" (
-  echo 首次运行，正在导入资源，请稍候……
+  echo First run: importing assets, please wait...
   "%GODOT%" --headless --path "%PROJ%" --import
 )
 
 start "" "%GODOT%" --path "%PROJ%"
+endlocal
 exit /b 0
