@@ -790,4 +790,8 @@ func _shot_dir() -> String:
 		if not d.ends_with("/") and not d.ends_with("\\"):
 			d += "/"
 		return d
-	return "C:/Users/a2402/Documents/Code/DinkumTown3D/"
+	# 默认输出到项目根（不硬编码本机路径，便于仓库共享）
+	var root := ProjectSettings.globalize_path("res://")
+	if not root.ends_with("/"):
+		root += "/"
+	return root
