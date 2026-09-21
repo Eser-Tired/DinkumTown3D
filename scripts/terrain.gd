@@ -20,6 +20,12 @@ var n_detail: FastNoiseLite
 var n_tint: FastNoiseLite
 var water_mat: ShaderMaterial
 
+# —— 季节染色 ——
+var ground_mi: MeshInstance3D
+var tintables: Array = []          # 会跟着季节变色的材质（干草地被等）
+var season_tint := Color(1.0, 1.0, 1.0)
+var season_amt := 0.0
+
 
 func _ready() -> void:
 	n_base = FastNoiseLite.new()
@@ -36,8 +42,27 @@ func _ready() -> void:
 	n_tint.seed = 31415
 	n_tint.frequency = 0.02
 
-	add_child(_build_ground())
+	ground_mi = _build_ground()
+	add_child(ground_mi)
 	add_child(_build_water())
+
+
+## 季节系统回调：换季时重算顶点色并刷新可染色材质
+func apply_season_tint(tint: Color, amount: float) -> void:
+	season_tint = tint
+	season_amt = clampf(amount, 0.0, 1.0)
+	if ground_mi != null:
+		ground_mi.mesh = _ground_mesh()
+	for m in tintables:
+		if m is StandardMaterial3D:
+			m.albedo_color = Color(1.0, 1.0, 1.0).lerp(season_tint, season_amt * 0.65)
+
+
+## 注册一个随季节变色的材质（main 里给干草地被用）
+func register_tintable(m: Material) -> void:
+	if m != null and not tintables.has(m):
+		tintables.append(m)
+		m.set("albedo_color", Color(1.0, 1.0, 1.0).lerp(season_tint, season_amt * 0.65))
 
 
 ## 任意点的地面高度 —— 地形、玩家、道具、动物共用
@@ -69,7 +94,15 @@ func _slope_at(x: float, z: float) -> float:
 	return Vector2(hx, hz).length() / (2.0 * d)
 
 
+## 季节染色包装：水线以下保持原色，陆地按季节色调混合
 func _color_at(x: float, z: float, h: float) -> Color:
+	var c := _raw_color_at(x, z, h)
+	if h < WATER_Y + 0.75:
+		return c
+	return c.lerp(c * season_tint, season_amt)
+
+
+func _raw_color_at(x: float, z: float, h: float) -> Color:
 	var slope := _slope_at(x, z)
 	var tint := n_tint.get_noise_2d(x, z) * 0.5 + 0.5
 
@@ -92,6 +125,25 @@ func _color_at(x: float, z: float, h: float) -> Color:
 
 
 func _build_ground() -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.mesh = _ground_mesh()
+	mi.material_override = _ground_material()
+	mi.name = "Ground"
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	return mi
+
+
+func _ground_material() -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.roughness = 0.97
+	mat.metallic = 0.0
+	mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	mat.uv1_scale = Vector3(1, 1, 1)
+	return mat
+
+
+func _ground_mesh() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 
@@ -120,20 +172,7 @@ func _build_ground() -> MeshInstance3D:
 			st.add_index(c)
 
 	st.generate_normals()
-
-	var mat := StandardMaterial3D.new()
-	mat.vertex_color_use_as_albedo = true
-	mat.roughness = 0.97
-	mat.metallic = 0.0
-	mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
-	mat.uv1_scale = Vector3(1, 1, 1)
-
-	var mi := MeshInstance3D.new()
-	mi.mesh = st.commit()
-	mi.material_override = mat
-	mi.name = "Ground"
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-	return mi
+	return st.commit()
 
 
 func _build_water() -> MeshInstance3D:

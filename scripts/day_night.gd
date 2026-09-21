@@ -96,9 +96,29 @@ func _process(dt: float) -> void:
 	_update(dt)
 
 
+## 向季节模块询问天气乘数（无季节模块或接口不符时恒为 1.0）
+func _season_mults() -> Vector2:
+	if GameBus == null or not GameBus.modules.has("season"):
+		return Vector2(1.0, 1.0)
+	var s = GameBus.modules["season"]
+	if not is_instance_valid(s):
+		return Vector2(1.0, 1.0)
+	var fm := 1.0
+	var sm := 1.0
+	if "fog_mult" in s:
+		fm = float(s.get("fog_mult"))
+	if "sun_mult" in s:
+		sm = float(s.get("sun_mult"))
+	return Vector2(fm, sm)
+
+
 func _update(_dt: float) -> void:
 	if sun == null:
 		return
+
+	var mults := _season_mults()
+	var fog_mult: float = mults.x
+	var sun_mult: float = mults.y
 
 	# —— 太阳轨迹 ——
 	var a := (time - 0.25) * TAU
@@ -113,7 +133,7 @@ func _update(_dt: float) -> void:
 	var col := Color(0.40, 0.50, 0.85).lerp(Color(1.0, 0.95, 0.84), day_f)
 	col = col.lerp(Color(1.0, 0.52, 0.26), dusk_f * 0.80)
 	sun.light_color = col
-	sun.light_energy = lerpf(0.14, 1.30, day_f) + dusk_f * 0.40
+	sun.light_energy = (lerpf(0.14, 1.30, day_f) + dusk_f * 0.40) * sun_mult
 	sun.visible = elev > -0.22
 	fill.light_energy = lerpf(0.10, 0.30, day_f)
 
@@ -134,7 +154,7 @@ func _update(_dt: float) -> void:
 
 	var e := env.environment
 	e.fog_light_color = hor
-	e.fog_density = lerpf(0.0060, 0.0012, day_f)
+	e.fog_density = lerpf(0.0060, 0.0012, day_f) * fog_mult
 	e.ambient_light_energy = lerpf(0.26, 0.40, day_f)
 	e.ambient_light_color = hor.lerp(Color(0.85, 0.90, 1.0), day_f * 0.65)
 	e.adjustment_enabled = true
@@ -142,8 +162,9 @@ func _update(_dt: float) -> void:
 	e.adjustment_saturation = lerpf(0.85, 1.20, day_f)
 	e.adjustment_brightness = lerpf(0.92, 0.99, day_f)
 
-	# —— 夜间灯光 ——
+	# —— 夜间灯光（跳过已释放/待释放的引用，读档重建后避免悬空） ——
 	var night := clampf(1.0 - day_f * 3.2, 0.0, 1.0)
+	night_lights = night_lights.filter(func(l): return is_instance_valid(l) and not l.is_queued_for_deletion())
 	for l in night_lights:
 		var base: float = l.get_meta("base_energy", 5.0)
 		l.visible = night > 0.02

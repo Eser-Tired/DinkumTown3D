@@ -4,6 +4,7 @@ class_name GameHUD
 
 var res_label: Label
 var clock_label: Label
+var season_label: Label
 var prompt_label: Label
 var build_label: Label
 var help_label: Label
@@ -11,7 +12,7 @@ var toast_label: Label
 var toast_t := 0.0
 
 const RES_NAME := {
-	"wood": "木材", "stone": "石头", "fiber": "纤维", "ore": "铁矿石"
+	"wood": "木材", "stone": "石头", "fiber": "纤维", "ore": "铁矿石", "food": "食物"
 }
 
 
@@ -53,6 +54,13 @@ func _build() -> void:
 	clock_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	add_child(clock_label)
 
+	# 季节 / 天气
+	add_child(_panel(Vector2(1150, 84), Vector2(226, 40), 0.42))
+	season_label = _label(17, Vector2(1166, 90), 210)
+	season_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	season_label.text = "—"
+	add_child(season_label)
+
 	# 交互提示（屏幕中下）
 	prompt_label = _label(22, Vector2(390, 690), 660)
 	prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -67,7 +75,7 @@ func _build() -> void:
 	add_child(_panel(Vector2(18, 640), Vector2(560, 150), 0.45))
 	help_label = _label(16, Vector2(34, 650), 540)
 	help_label.size = Vector2(540, 140)
-	help_label.text = "WASD/方向键 移动 · Shift 奔跑 · 空格 跳跃\n鼠标右键拖拽 转视角 · 滚轮 缩放\nE 采集 · B 建造模式 · 1-4 选建筑 · 左键放置\nT 加速时间 · H 隐藏本帮助"
+	help_label.text = "WASD/方向键 移动 · Shift 奔跑 · 空格 跳跃\n鼠标右键拖拽 转视角 · 滚轮 缩放\nE 采集 · B 建造模式 · 1-4 选建筑 · 左键放置\nF 农事 · G 换作物 · T 加速时间 · H 隐藏帮助\nF2 保存 · F3 读取 · M 静音"
 	add_child(help_label)
 
 	# 浮动提示
@@ -79,13 +87,18 @@ func _build() -> void:
 
 func set_resources(res: Dictionary) -> void:
 	var t := ""
-	for k in ["wood", "stone", "fiber", "ore"]:
+	for k in ["wood", "stone", "fiber", "ore", "food"]:
 		t += "%s  %d\n" % [RES_NAME[k], int(res.get(k, 0))]
 	res_label.text = t
 
 
 func set_clock(day: int, clock: String, speed: float) -> void:
 	clock_label.text = "第 %d 天   %s%s" % [day, clock, "   >>" if speed > 1.0 else ""]
+
+
+func set_season(text: String) -> void:
+	if season_label != null:
+		season_label.text = text
 
 
 func set_prompt(text: String) -> void:

@@ -9,9 +9,14 @@ const KangarooS := preload("res://scripts/kangaroo.gd")
 const EmuS := preload("res://scripts/emu.gd")
 const DayNightS := preload("res://scripts/day_night.gd")
 const HUDS := preload("res://scripts/hud.gd")
+const AudioS := preload("res://scripts/audio.gd")
+const SeasonS := preload("res://scripts/season.gd")
+const FarmS := preload("res://scripts/farm.gd")
+const SaveS := preload("res://scripts/save_system.gd")
 
 const TOWN := Vector2(-14.0, -10.0)
 const LAKE := Vector2(48.0, 22.0)
+const FARM_ORIGIN := Vector2(-10.0, 14.0)   # TOWN + (4, 24)，与菜地同侧
 
 const BUILD_ITEMS := [
 	{"name": "篝火", "cost": {"wood": 3}, "make": "campfire"},
@@ -33,12 +38,25 @@ var bobs: Array = []
 var flickers: Array = []
 var placed_pts: Array = []     # 已占用点（避免重叠）
 
-var inv := {"wood": 0, "stone": 0, "fiber": 0, "ore": 0}
+var audio: AudioDirector
+var season: SeasonManager
+var farm: FarmSystem
+var save_sys: SaveSystem
+
+var inv := {"wood": 0, "stone": 0, "fiber": 0, "ore": 0, "food": 0}
 var build_mode := false
 var build_index := 0
 var preview: Node3D = null
 var preview_rot := 0.0
 var hud_timer := 0.0
+
+# —— 存档相关 ——
+var next_res_id := 0
+var harvested_ids: Array = []    # 已被采集的资源稳定 id
+var built_items: Array = []      # {kind, x, z, rot}
+var step_dist := 0.0
+var last_pos := Vector3.ZERO
+var rain_particles: GPUParticles3D = null
 
 
 func _ready() -> void:
@@ -68,8 +86,76 @@ func _ready() -> void:
 	hud.name = "HUD"
 	add_child(hud)
 	hud.set_resources(inv)
+	GameBus.toast.connect(Callable(hud, "toast"))
+
+	# —— 音效（自己挂到 world 上）——
+	audio = AudioS.new()
+	audio.setup(self, player)
+	audio.register_ambient_source("water", Vector3(LAKE.x, 0.4, LAKE.y))
+
+	# —— 季节 / 天气 ——
+	season = SeasonS.new()
+	season.name = "Season"
+	add_child(season)
+	season.setup(dn, terrain)
+
+	# —— 农场 ——
+	farm = FarmS.new()
+	farm.name = "Farm"
+	add_child(farm)
+	farm.setup(self, terrain, dn)
+
+	# —— 存档 ——
+	save_sys = SaveS.new()
+	save_sys.name = "SaveSystem"
+	add_child(save_sys)
+	save_sys.setup(self)
+	GameBus.new_day.connect(_on_auto_save)
+
+	GameBus.register_module("main", self)
+
+	_setup_rain()
+	GameBus.weather_changed.connect(_on_weather)
+	if season != null:
+		_on_weather(season.weather)
 
 	_check_auto_shot()
+
+
+## 雨幕：跟随玩家的粒子柱，weather_changed 驱动
+func _setup_rain() -> void:
+	rain_particles = GPUParticles3D.new()
+	rain_particles.emitting = false
+	rain_particles.amount = 900
+	rain_particles.lifetime = 1.1
+	rain_particles.visibility_aabb = AABB(Vector3(-15, -9, -15), Vector3(30, 20, 30))
+
+	var pm := ParticleProcessMaterial.new()
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	pm.emission_box_extents = Vector3(13.0, 0.5, 13.0)
+	pm.direction = Vector3(0.0, -1.0, 0.0)
+	pm.spread = 2.0
+	pm.initial_velocity_min = 17.0
+	pm.initial_velocity_max = 21.0
+	pm.gravity = Vector3(0.0, -22.0, 0.0)
+	rain_particles.process_material = pm
+
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.02, 0.5, 0.02)
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = Color(0.65, 0.75, 0.90, 0.42)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	bm.material = m
+	rain_particles.draw_pass_1 = bm
+
+	rain_particles.position = Vector3(0.0, 11.0, 0.0)
+	player.add_child(rain_particles)
+
+
+func _on_weather(w: String) -> void:
+	if rain_particles != null:
+		rain_particles.emitting = (w == "rain" or w == "storm")
 
 
 # ——————————————— 放置工具 ———————————————
@@ -95,6 +181,8 @@ func _place_flora(node: Node3D, x: float, z: float, rot := 0.0, scl := 1.0) -> v
 		colliders.append({"node": node, "pos": Vector2(x, z), "r": r * scl})
 		placed_pts.append(Vector2(x, z))
 	if node.has_meta("resource"):
+		node.set_meta("rid", next_res_id)
+		next_res_id += 1
 		resources.append(node)
 
 
@@ -145,18 +233,7 @@ func _build_town() -> void:
 	_place(PropsS.make_watertower(), c.x - 10, c.y - 22)
 	_place(PropsS.make_windmill(), c.x + 28, c.y - 24)
 
-	# 菜地 + 围栏
-	var g0 := c + Vector2(4, 24)
-	for i in 3:
-		for j in 2:
-			var p := g0 + Vector2(float(i) * 4.8, float(j) * 4.8)
-			_place(PropsS.make_garden(), p.x, p.y)
-	for i in 6:
-		var p := g0 + Vector2(-2.7 + float(i) * 4.8, -3.0)
-		_place(PropsS.make_fence(4.6), p.x, p.y, 0.0)
-	for j in 3:
-		var p := g0 + Vector2(-3.0, -2.7 + float(j) * 4.8)
-		_place(PropsS.make_fence(4.6), p.x, p.y, PI * 0.5)
+	# 菜地区域已交给农场系统（FarmSystem 在 FARM_ORIGIN 自建田块）
 
 	# 杂项
 	_place(PropsS.make_clothesline(), c.x - 8, c.y + 12, 0.4)
@@ -265,6 +342,7 @@ func _scatter_flora() -> void:
 		mmi.material_override = FloraS.grass_material()
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(mmi)
+		terrain.register_tintable(mmi.material_override)
 
 
 # ——————————————— 动物 ———————————————
@@ -302,6 +380,21 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_R:
 				if build_mode:
 					preview_rot += PI * 0.25
+			KEY_F:
+				if farm != null:
+					farm.interact(player.global_position)
+			KEY_F2:
+				if save_sys != null:
+					save_sys.save(1)
+			KEY_F3:
+				if save_sys != null:
+					save_sys.load(1)
+			KEY_G:
+				if farm != null:
+					hud.toast("作物：" + farm.cycle_crop(1))
+			KEY_M:
+				AudioServer.set_bus_mute(0, not AudioServer.is_bus_mute(0))
+				hud.toast("音效已" + ("静音" if AudioServer.is_bus_mute(0) else "开启"))
 			KEY_T:
 				dn.toggle_speed()
 			KEY_H:
@@ -334,13 +427,25 @@ func _harvest() -> void:
 	var n := _nearest_resource()
 	if n == null:
 		return
+	_collect_resource(n)
+
+
+## 收走一个资源节点：silent=true 时只移除不入库（读档时回放已采集状态）
+func _collect_resource(n: Node3D, silent := false) -> void:
 	var kind: String = n.get_meta("resource", "wood")
 	var amt: int = int(n.get_meta("amount", 1))
-	inv[kind] = int(inv.get(kind, 0)) + amt
-	hud.set_resources(inv)
-	hud.toast("+%d %s" % [amt, hud.RES_NAME[kind]])
-
 	var p := n.global_position
+	var rid: int = int(n.get_meta("rid", -1))
+
+	if not silent:
+		inv[kind] = int(inv.get(kind, 0)) + amt
+		hud.set_resources(inv)
+		hud.toast("+%d %s" % [amt, hud.RES_NAME[kind]])
+		GameBus.res_harvested.emit(kind, amt, p)
+
+	if rid >= 0 and not harvested_ids.has(rid):
+		harvested_ids.append(rid)
+
 	resources.erase(n)
 	for i in range(colliders.size() - 1, -1, -1):
 		if colliders[i].node == n:
@@ -348,7 +453,7 @@ func _harvest() -> void:
 			break
 	n.queue_free()
 
-	if kind == "wood":
+	if kind == "wood" and not silent:
 		var stump := FloraS.make_stump()
 		stump.position = Vector3(p.x, terrain.height_at(p.x, p.z), p.z)
 		add_child(stump)
@@ -445,9 +550,13 @@ func _try_place_at_mouse() -> void:
 	for k in item.cost:
 		inv[k] = int(inv.get(k, 0)) - int(item.cost[k])
 	hud.set_resources(inv)
-	_place(_make_build(item.make), p.x, p.z, preview_rot)
+	var bn := _make_build(item.make)
+	bn.set_meta("player_built", true)
+	_place(bn, p.x, p.z, preview_rot)
 	hud.toast("已放置 " + item.name)
+	built_items.append({"kind": item.make, "x": p.x, "z": p.z, "rot": preview_rot})
 	dn.collect_night_lights(self)
+	GameBus.item_built.emit(item.make, p)
 
 
 # ——————————————— 主循环 ———————————————
@@ -455,11 +564,17 @@ func _process(dt: float) -> void:
 	var t := Time.get_ticks_msec() * 0.001
 
 	for s in spins:
+		if not is_instance_valid(s.node):
+			continue
 		s.node.rotate_z(s.speed * dt)
 	for b in bobs:
+		if not is_instance_valid(b.node):
+			continue
 		b.node.position.y = b.base + sin(t * 1.1 + b.base * 3.0) * 0.09
 		b.node.rotation.z = sin(t * 0.9) * 0.03
 	for f in flickers:
+		if not is_instance_valid(f.node):
+			continue
 		var k := 0.85 + sin(t * 9.0 * f.speed) * 0.12 + sin(t * 21.0 * f.speed) * 0.05
 		f.node.scale = Vector3(k, k * 1.1, k)
 		f.node.rotation.y += dt * 1.4
@@ -471,6 +586,10 @@ func _process(dt: float) -> void:
 			hud.set_prompt("[E] 采集 %s  ×%d" % [hud.RES_NAME[kind], int(n.get_meta("amount", 1))])
 		else:
 			hud.set_prompt("")
+		if farm != null:
+			var fp := farm.prompt_text(player.global_position)
+			if fp != "":
+				hud.set_prompt(fp + "　[G] 切换作物：" + farm.selected_crop_name())
 	else:
 		var item: Dictionary = BUILD_ITEMS[build_index]
 		var cost_txt := ""
@@ -487,11 +606,38 @@ func _process(dt: float) -> void:
 			for mi in _all_meshes(preview):
 				mi.transparency = 0.45 if ok else 0.8
 
+	# —— 脚步事件（音效模块消费）——
+	var ppos := player.global_position
+	var moved := ppos.distance_to(last_pos)
+	last_pos = ppos
+	if moved > 0.0005:
+		step_dist += moved
+		if step_dist >= 1.9:
+			step_dist = 0.0
+			GameBus.player_step.emit(moved / maxf(dt, 0.0001), ppos)
+
 	hud_timer -= dt
 	if hud_timer <= 0.0:
 		hud_timer = 0.2
 		hud.set_clock(dn.day_count, dn.clock_string(), dn.speed_scale)
 		hud.set_build(_build_menu_text())
+		if season != null:
+			hud.set_season("%s · 第 %d 天 · %s" % [season.season_name, season.day_in_season, _weather_cn(season.weather)])
+
+
+func _weather_cn(w: String) -> String:
+	match w:
+		"sunny": return "晴"
+		"cloudy": return "多云"
+		"rain": return "下雨"
+		"storm": return "暴风雨"
+	return w
+
+
+## 每日自动存档（槽 0）
+func _on_auto_save(_day: int, _season: int) -> void:
+	if save_sys != null:
+		save_sys.save(0)
 
 
 func _build_menu_text() -> String:
@@ -508,6 +654,92 @@ func _build_menu_text() -> String:
 	return s
 
 
+# ——————————————— 资源接口（农场模块依赖） ———————————————
+func has_item(kind: String, n: int) -> bool:
+	return int(inv.get(kind, 0)) >= n
+
+
+func take_item(kind: String, n: int) -> bool:
+	if not has_item(kind, n):
+		return false
+	inv[kind] = int(inv.get(kind, 0)) - n
+	hud.set_resources(inv)
+	return true
+
+
+func give_item(kind: String, n: int) -> void:
+	inv[kind] = int(inv.get(kind, 0)) + n
+	hud.set_resources(inv)
+
+
+# ——————————————— 存档契约 ———————————————
+func serialize() -> Dictionary:
+	var pp := player.global_position
+	return {
+		"inv": inv.duplicate(),
+		"time": dn.time,
+		"day": dn.day_count,
+		"pos": [pp.x, pp.y, pp.z],
+		"yaw": player.yaw,
+		"pitch": player.pitch,
+		"harvested": harvested_ids.duplicate(),
+		"built": built_items.duplicate(),
+	}
+
+
+func deserialize(d: Dictionary) -> void:
+	var iv: Variant = d.get("inv", {})
+	if iv is Dictionary:
+		for k in (iv as Dictionary):
+			inv[k] = int((iv as Dictionary)[k])
+	hud.set_resources(inv)
+
+	dn.day_count = int(d.get("day", 1))
+	dn.time = float(d.get("time", 0.30))
+
+	var p: Variant = d.get("pos", [0.0, 0.0, 0.0])
+	if p is Array and (p as Array).size() >= 3:
+		var pa: Array = p
+		player.global_position = Vector3(float(pa[0]), float(pa[1]), float(pa[2]))
+		last_pos = player.global_position
+	player.yaw = float(d.get("yaw", 0.0))
+	player.pitch = float(d.get("pitch", -0.35))
+
+	# 回放已采集：世界是按固定随机种子重建的，按稳定 id 移除即可
+	var hv: Variant = d.get("harvested", [])
+	if hv is Array:
+		harvested_ids = (hv as Array).duplicate()
+		for n in resources.duplicate():
+			if is_instance_valid(n) and harvested_ids.has(int(n.get_meta("rid", -1))):
+				_collect_resource(n, true)
+
+	# 重建玩家建造物：先清掉读档前放置的（避免孤儿节点），再按存档重建
+	for c in get_children():
+		if c is Node3D and c.has_meta("player_built"):
+			for i in range(colliders.size() - 1, -1, -1):
+				if colliders[i].node == c:
+					colliders.remove_at(i)
+					break
+			c.queue_free()
+	# 动画数组里可能引用了刚释放的节点，一并清理
+	spins = spins.filter(func(e): return is_instance_valid(e.node))
+	bobs = bobs.filter(func(e): return is_instance_valid(e.node))
+	flickers = flickers.filter(func(e): return is_instance_valid(e.node))
+	var bv: Variant = d.get("built", [])
+	if bv is Array:
+		built_items = (bv as Array).duplicate()
+		for b in built_items:
+			if b is Dictionary:
+				var bd: Dictionary = b
+				var nb := _make_build(str(bd.get("kind", "campfire")))
+				nb.set_meta("player_built", true)
+				_place(nb, float(bd.get("x", 0.0)), float(bd.get("z", 0.0)),
+					float(bd.get("rot", 0.0)))
+	dn.collect_night_lights(self)
+	if season != null:
+		_on_weather(str(season.weather))
+
+
 # ——————————————— 自动截图（--auto-shot） ———————————————
 func _check_auto_shot() -> void:
 	if not OS.get_cmdline_args().has("--auto-shot"):
@@ -519,8 +751,8 @@ func _check_auto_shot() -> void:
 	get_viewport().get_texture().get_image().save_png(base + "shot1_morning.png")
 
 	dn.time = 0.72
-	player.yaw = -1.80
-	player.pitch = -0.22
+	player.yaw = 1.30
+	player.pitch = -0.18
 	await get_tree().create_timer(1.2).timeout
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(base + "shot2_dusk_lake.png")
