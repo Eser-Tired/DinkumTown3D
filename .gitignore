@@ -8,10 +8,8 @@ export_credentials.cfg
 data_*/
 mono_crash.*.json
 
-# 自动截图产物
-shot1_morning.png
-shot2_dusk_lake.png
-shot3_night.png
+# 自动截图产物（仅项目根；docs/screenshots 下的归档正常跟踪）
+/shot*.png
 
 # 运行时存档
 user://
