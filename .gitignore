@@ -1,0 +1,17 @@
+# Godot 4.x
+.godot/
+*.uid
+export_presets.cfg
+export_credentials.cfg
+.import/
+.mono/
+data_*/
+mono_crash.*.json
+
+# 自动截图产物
+shot1_morning.png
+shot2_dusk_lake.png
+shot3_night.png
+
+# 运行时存档
+user://
