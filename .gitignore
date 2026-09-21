@@ -11,6 +11,9 @@ mono_crash.*.json
 # 自动截图产物（仅项目根；docs/screenshots 下的归档正常跟踪）
 /shot*.png
 
+# Godot 生成的导入元数据
+*.import
+
 # 运行时存档
 user://
 
