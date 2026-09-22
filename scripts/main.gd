@@ -121,7 +121,27 @@ func _ready() -> void:
 		_on_weather(season.weather)
 
 	_setup_touch()
+	_consume_pending_load()
 	_check_auto_shot()
+
+
+## 消费主界面写下的握手值：决定这一局是新游戏还是读档
+func _consume_pending_load() -> void:
+	if GameBus == null:
+		return
+	var slot: int = GameBus.pending_load_slot
+	GameBus.pending_load_slot = -1
+	if slot < 0:
+		return                      # -1/-2：新游戏，什么都不做
+	if save_sys != null:
+		save_sys.load(slot)
+
+
+## 返回主界面（暂停菜单 / 触控系统按钮都走这里）
+func return_to_menu() -> void:
+	if save_sys != null:
+		save_sys.save(0)            # 离开前留一份自动存档，避免进度丢失
+	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
 
 
 # ——————————————— 移动端触控适配 ———————————————
@@ -468,6 +488,8 @@ func _do_action(a: String) -> void:
 		"esc":
 			build_mode = false
 			_refresh_preview()
+		"menu":
+			return_to_menu()
 		"jump":
 			GameBus.touch_jump_edge = true
 		_:

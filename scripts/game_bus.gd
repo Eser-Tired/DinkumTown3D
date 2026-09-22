@@ -14,6 +14,11 @@ signal game_saved(slot: int)
 signal game_loaded(slot: int)
 signal toast(msg: String)
 
+# —— 跨场景握手 ——
+# 主界面在主场景加载【之前】写入，main.gd 在 _ready 末尾读取并清零。
+# 取值：-2 = 新游戏（跳过读档）；-1 = 未指定（等同新游戏）；0..SLOTS-1 = 读取对应槽位。
+var pending_load_slot := -1
+
 # —— 触控输入通道 ——
 # 移动端由 TouchControls 写入，player / main 作为额外输入源消费。
 # 桌面端恒为初始值，因此所有读它的逻辑在桌面行为不变。

@@ -1,8 +1,21 @@
 extends Node2D
 ## 临时自检：触控 UI 在各种分辨率下是否与 HUD / 自身重叠
-## 用法：Godot --path <proj> [--resolution WxH] res://tools/_touch_check.tscn
+## 用法（二选一）：
+##   Godot --path <proj> --resolution WxH res://tools/touch_layout_check.tscn   （编辑器/调试器注入）
+##   Godot --headless --path <proj> res://tools/touch_layout_check.tscn -- --size WxH
+##
+## 【为什么要 --size】headless 模式下 --resolution 不生效，viewport 恒为 64x64，
+## 自检会在错误的分辨率上跑并全部 FAIL。所以这里自己也接一个 --size 兜底。
+
+const FALLBACK := Vector2i(1440, 810)
 
 func _ready() -> void:
+	var forced := _parse_size()
+	if forced != Vector2i.ZERO:
+		# headless 下窗口尺寸锁死，直接改根视口尺寸才能让锚点布局按目标分辨率计算
+		get_window().size = forced
+		get_viewport().size = forced
+
 	var hud: CanvasLayer = load("res://scripts/hud.gd").new()
 	add_child(hud)
 	var tc: CanvasLayer = load("res://scripts/touch_controls.gd").new()
@@ -64,6 +77,24 @@ func _ready() -> void:
 
 func _overlap(a: Rect2, b: Rect2) -> bool:
 	return a.intersects(b) and a.intersection(b).get_area() > 1.0
+
+
+## 解析 --size 1440x810（兜底用，headless 下 --resolution 无效）
+## 注意：`--` 之后的参数属于"用户参数"，必须用 get_cmdline_user_args()，
+## get_cmdline_args() 拿不到它们。
+func _parse_size() -> Vector2i:
+	var args := OS.get_cmdline_user_args()
+	var i: int = args.find("--size")
+	if i < 0 or i + 1 >= args.size():
+		return Vector2i.ZERO
+	var parts: PackedStringArray = args[i + 1].split("x")
+	if parts.size() != 2:
+		return Vector2i.ZERO
+	var w := int(parts[0])
+	var h := int(parts[1])
+	if w < 320 or h < 240:
+		return Vector2i.ZERO
+	return Vector2i(w, h)
 
 
 func _rect_circle(r: Rect2, c: Vector2, rad: float) -> bool:
