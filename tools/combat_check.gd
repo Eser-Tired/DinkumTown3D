@@ -183,12 +183,106 @@ func _run() -> void:
 		await get_tree().process_frame
 	_eq(m.player.weapon_idx, W.count() - 1, "读档恢复武器槽位")
 
+	# —— 11) 快捷物品栏 ——（触控重构新增）
+	_check_hotbar()
+	# —— 12) 轻点采集 / 攻击的扇形判定 ——（触控重构新增）
+	await _check_tap_arc()
+
+
+## 物品栏：格子数、类型、选中与 player.weapon_idx 的一致性
+func _check_hotbar() -> void:
+	_eq(m.hotbar.size(), 4, "物品栏恰好 4 格")
+	_ok(m.hotbar.size() == 4, "物品栏非空")
+	if m.hotbar.size() != 4:
+		return
+	# 前若干格必须是武器，且与 WeaponsS 顺序一致
+	var weapons := 0
+	for i in m.hotbar.size():
+		var s: Dictionary = m.hotbar[i]
+		if str(s.get("kind", "")) == "weapon":
+			weapons += 1
+	_ok(weapons >= 2, "物品栏至少含 2 件武器（实得 %d）" % weapons)
+
+	# 选第 2 格（武器）应把 player.weapon_idx 切过去，且高亮跟着走
+	m._select_hotbar(1)
+	var s1: Dictionary = m.hotbar[1]
+	if str(s1.get("kind", "")) == "weapon":
+		_eq(m.player.weapon_id(), str(s1.get("id", "")), "选格后 player 手持同步")
+		_eq(m.hotbar_sel, 1, "选格后高亮下标同步")
+		_ok(not m.build_mode, "选武器自动退出建造模式")
+
+	# 建格子：应进建造模式并把 build_index 对上
+	var bi := -1
+	for i in m.hotbar.size():
+		if str(m.hotbar[i].get("kind", "")) == "build":
+			bi = i
+			break
+	if bi >= 0:
+		m._select_hotbar(bi)
+		_ok(m.build_mode, "选建造格进入建造模式")
+		_eq(m.build_index, int(m.hotbar[bi].get("build_index", -1)), "选建造格同步 build_index")
+		m._set_build_mode(false)
+
+	# 空格子：不改状态、不崩溃
+	var before_sel: int = m.hotbar_sel
+	m._select_hotbar(99)
+	_eq(m.hotbar_sel, before_sel, "越界点选不改选中态")
+
+
+## 扇形判定：正前方能选到，正后方选不到；轻点射程比桌面端更宽
+func _check_tap_arc() -> void:
+	# 找一只活着的动物，把它搬到玩家附近并锁住
+	var beast: Huntable = null
+	for c in m.critters:
+		if is_instance_valid(c) and not (c as Huntable).is_dead():
+			beast = c
+			break
+	if beast == null:
+		return
+
+	m.player.global_position = Vector3(0.0, m.terrain.height_at(0.0, 0.0), 0.0)
+	var origin: Vector3 = m.player.global_position
+	var fwd := Vector3(0.0, 0.0, 1.0)
+	var back := Vector3(0.0, 0.0, -1.0)
+
+	# 明确固定成斧头（reach 2.6），否则前面的存档往返测试会把武器留在长矛上，
+	# 距离断言就失去意义了。
+	m.player.weapon_idx = 0
+	_ok(m.player.weapon_id() == "axe", "固定为斧头做扇区测试")
+
+	# 有效射程 = reach + 动物 hit_radius（袋鼠 1.0），斧头即 3.6。
+	# 取 2.0（稳进）与 4.2（稳出）两个不会踩边的距离。
+	beast.global_position = origin + fwd * 2.0
+	_ok(m._find_critter_in_arc(origin, fwd, false) == beast, "正前方 2.0 处能选中")
+	_ok(m._find_critter_in_arc(origin, back, false) == null, "正后方选不中（扇形生效）")
+
+	beast.global_position = origin + fwd * 4.2
+	_ok(m._find_critter_in_arc(origin, fwd, false) == null, "4.2 超出 axe 有效射程")
+	_ok(m._find_critter_in_arc(origin, fwd, true) == beast, "4.2 在轻点放宽射程内")
+
+	# 侧后方 120°：超出斧头 35° 半角，选不中
+	beast.global_position = origin + Vector3(1.7, 0.0, -1.0)
+	_ok(m._find_critter_in_arc(origin, fwd, true) == null, "120° 侧后方选不中")
+
+	# 资源扇形：目标是资源节点，用宽容角 86°
+	if m.resources.size() > 0:
+		var res: Node3D = m.resources[0]
+		res.global_position = origin + fwd * 2.5
+		_ok(m._find_resource_in_arc(origin, fwd) == res, "正前方资源能选中")
+		res.global_position = origin + back * 2.5
+		_ok(m._find_resource_in_arc(origin, fwd) == null, "正后方资源选不中")
+
 
 ## 把玩家瞬移到指定水平位置并设定朝向，同时清空攻击冷却
+## 【为什么还要设 cam_yaw】攻击判定走的是 player.aim_dir()（相机朝向），
+## 因为身体朝向 model.rotation.y 是跟"移动方向"插值的，会滞后于视线。
+## 只设 model 不设相机，就会重现"看着它却打空"的问题。
 func _place_player(pos2: Vector2, face_y: float) -> void:
 	m.player.global_position = Vector3(
 		pos2.x, m.terrain.height_at(pos2.x, pos2.y), pos2.y)
 	m.player.model.rotation.y = face_y
+	# 相机朝前 = 身体朝前 + PI（相机 z 轴与模型 +Z 相反）
+	m.player.cam_yaw.rotation.y = face_y + PI
 	m.player.attack_cd = 0.0
 
 

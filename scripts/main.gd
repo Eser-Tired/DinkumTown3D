@@ -27,6 +27,23 @@ const BUILD_ITEMS := [
 	{"name": "路灯", "cost": {"wood": 2, "stone": 1}, "make": "lamp"},
 ]
 
+## 快捷物品栏槽位类型
+const SLOT_EMPTY := "empty"      # 空格子
+const SLOT_WEAPON := "weapon"    # 指向 WeaponsS 里的一件武器
+const SLOT_BUILD := "build"      # 绑定建造菜单里的一项，选中即切换该建造物
+
+## —— 触控参数 ——
+## 轻点采集的角度上限：目标必须落在相机前方这个扇形内（弧度，半角）。
+## 1.5 rad ≈ 86°，基本覆盖屏幕中部到偏下的可视区域，宽容但不至于误抓身后的东西。
+const TAP_ARC := 1.5
+## 轻点攻击的附加射程：比武器 reach 再放宽一点，否则手机上很难点中
+const TAP_ATTACK_PAD := 0.9
+
+## 建造预览沿视线推进的距离（触控拖动移动建造物时用）
+const BUILD_DIST_MIN := 2.0
+const BUILD_DIST_MAX := 12.0
+const BUILD_DIST_DEFAULT := 4.5
+
 var terrain: Node3D
 var player: CharacterBody3D
 var dn: DayNight
@@ -51,6 +68,14 @@ var build_index := 0
 var preview: Node3D = null
 var preview_rot := 0.0
 var hud_timer := 0.0
+var preview_dist := BUILD_DIST_DEFAULT   # 预览离玩家的距离，触屏拖动时改
+
+## —— 快捷物品栏 ——
+## 内容由 _rebuild_hotbar() 生成，随后通过 GameBus.sync_hotbar() 下发给
+## TouchControls 渲染。真正生效的持有物由 _equip() 落到 player/build_index 上，
+## 槽位数组只是"显示层"，不做真值。
+var hotbar: Array = []
+var hotbar_sel := 0
 
 # —— 存档相关 ——
 var next_res_id := 0
@@ -124,6 +149,9 @@ func _ready() -> void:
 	if season != null:
 		_on_weather(season.weather)
 
+	# 物品栏在触控层挂载前先建好，桌面端也有一份（键盘 1-4 用）
+	_rebuild_hotbar()
+
 	_setup_touch()
 	_consume_pending_load()
 	_check_auto_shot()
@@ -158,10 +186,14 @@ func _setup_touch() -> void:
 	# connect 晚了这一帧就丢了，HUD 将永远停在桌面布局上。
 	GameBus.touch_action.connect(_on_touch_action)
 	GameBus.touch_layout_changed.connect(_on_touch_layout)
+	GameBus.touch_tap.connect(_on_touch_tap)
+	GameBus.touch_build_drag.connect(_on_touch_drag_build)
 	add_child(TouchS.new())
 	if forced:
 		# 桌面调试：把鼠标当一根手指用
 		ProjectSettings.set_setting("input_devices/pointing/emulate_touch_from_mouse", true)
+	# 物品栏必须在 TouchControls 挂载之后再下发，否则它还没连上信号
+	_rebuild_hotbar()
 
 
 ## 视口变化时 HUD 同步避让（首次挂载时 TouchControls 也会 emit 一次）
@@ -171,7 +203,40 @@ func _on_touch_layout(w: float, h: float, k: float) -> void:
 
 
 func _on_touch_action(a: String) -> void:
+	# 建造模式下「使用」键的语义变成"落位"，与桌面端左键一致
+	if a == "use" and build_mode:
+		_do_action("place")
+		return
 	_do_action(a)
+
+
+## 屏幕轻点：就近判定采集 / 攻击
+## 关于视角：触屏没有右键转视角，相机就是"准星"。角色的身体朝向在移动中会
+## 滞后于相机（转身有插值），所以这里一律用 aim_dir()（相机朝向）做扇形判定，
+## 玩家「看着哪就采哪」才符合直觉。
+func _on_touch_tap(pos: Vector2) -> void:
+	if player == null:
+		return
+	if build_mode:
+		# 建造模式下轻点是"把预览挪到这"，不是采集
+		var g := _pick_ground(pos)
+		if g != Vector3.ZERO:
+			_set_preview_pos(g)
+		return
+
+	# 优先打动物：动物会跑，机会成本比资源高
+	var beast := _find_critter_in_arc(player.global_position, player.aim_dir(), true)
+	if beast != null:
+		_attack_at(beast)
+		return
+
+	# 其次采集资源
+	var n := _find_resource_in_arc(player.global_position, player.aim_dir())
+	if n != null:
+		_collect_resource(n)
+		return
+
+	hud.toast("这里没有可采集的东西")
 
 
 ## 菜单 / 提示里的键位说明：触控模式换成不带键位的说法
@@ -179,15 +244,48 @@ func _hint(kbd: String, touch: String) -> String:
 	return touch if GameBus.touch_enabled else kbd
 
 
-## 触控模式没有鼠标射线，建造预览改落在玩家正前方的地面上
-func _preview_in_front() -> Vector3:
+## 触控模式没有鼠标射线，建造预览改落在玩家正前方的地面上。
+## dist 为沿视线推进的距离，触摸拖动会改它。
+func _preview_in_front(dist := -1.0) -> Vector3:
 	if player == null or terrain == null:
 		return Vector3.ZERO
-	var yaw: float = player.yaw
-	var off := Vector3(-sin(yaw), 0.0, -cos(yaw)) * 4.5
-	var p := player.global_position + off
+	var d: float = preview_dist if dist < 0.0 else dist
+	var dir: Vector3 = player.aim_dir()
+	var p: Vector3 = player.global_position + dir * d
 	p.y = terrain.height_at(p.x, p.z)
 	return p
+
+
+## 找一个"站得住"的预览距离：从近到远扫一遍，返回第一个 _place_ok 通过的。
+## 为什么要这个：触控下预览距离是固定初值，玩家一进建造模式可能正对着房子，
+## 预览直接卡在墙里，提示"此处放不下"，但玩家不知道要往前还是往后拖。
+## 自动找一个合法起点，剩下的微调交给拖动。
+func _find_good_preview_dist() -> float:
+	var d := BUILD_DIST_MIN
+	while d <= BUILD_DIST_MAX:
+		var p := _preview_in_front(d)
+		if _place_ok(p, 1.0):
+			return d
+		d += 0.5
+	return BUILD_DIST_DEFAULT
+
+
+## 统一入口：把预览摆到某个世界坐标，并更新可放置高亮
+func _set_preview_pos(g: Vector3) -> void:
+	if preview == null or not is_instance_valid(preview):
+		return
+	preview.global_position = g
+	preview.rotation.y = preview_rot
+
+
+## 触屏拖动建造物：手指上下拖动改变预览离玩家的距离。
+## 为什么用"距离"而不是直接投射到手指下的地面：手指会挡住目标点，
+## 而且手机上射线投影到远处地面噪声极大；改距离的手感稳定得多。
+func _on_touch_drag_build(rel: Vector2) -> void:
+	if not build_mode or preview == null:
+		return
+	preview_dist = clampf(preview_dist - rel.y * 0.02, BUILD_DIST_MIN, BUILD_DIST_MAX)
+	_set_preview_pos(_preview_in_front())
 
 
 ## 雨幕：跟随玩家的粒子柱，weather_changed 驱动
@@ -501,7 +599,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		match event.keycode:
 			KEY_E: _do_action("harvest")
 			KEY_B: _do_action("build")
-			KEY_1, KEY_2, KEY_3, KEY_4: _do_action("pick%d" % (event.keycode - KEY_1 + 1))
+			# 数字键在建造模式下等价于直接放建筑，否则切武器。这样一套键位
+			# 在两种模式下都说得通，不用记两套。
+			KEY_1, KEY_2, KEY_3, KEY_4:
+				if build_mode:
+					_do_action("pick%d" % (event.keycode - KEY_1 + 1))
+				else:
+					_do_action("hot%d" % (event.keycode - KEY_1 + 1))
 			KEY_R: _do_action("rotate")
 			KEY_F: _do_action("farm")
 			KEY_Q: _do_action("swap_weapon")
@@ -530,6 +634,11 @@ func _do_action(a: String) -> void:
 			_harvest()
 		"build":
 			build_mode = not build_mode
+			if build_mode:
+				preview_dist = _find_good_preview_dist()
+				# 进建造模式时把物品栏切到当前建筑对应的那一格，避免"看到的是斧头，
+				# 放下去的却是帐篷"这种不一致
+				_equip_build_slot(build_index)
 			_refresh_preview()
 		"rotate":
 			if build_mode:
@@ -539,11 +648,13 @@ func _do_action(a: String) -> void:
 		"farm":
 			if farm != null:
 				farm.interact(player.global_position)
-		"attack":
-			_attack()
+		"attack", "use":
+			if build_mode:
+				_try_place_at_mouse()
+			else:
+				_attack()
 		"swap_weapon":
-			hud.toast("武器：" + player.cycle_weapon(1))
-			hud.set_resources(inv)
+			_cycle_held_weapon(1)
 		"save":
 			if save_sys != null:
 				save_sys.save(1)
@@ -563,7 +674,8 @@ func _do_action(a: String) -> void:
 				var on := not hud.help_label.visible
 				hud.show_help_panel(on)
 		"esc":
-			build_mode = false
+			_set_build_mode(false)
+			_restore_hotbar_after_build()
 			_refresh_preview()
 		"menu":
 			return_to_menu()
@@ -574,53 +686,219 @@ func _do_action(a: String) -> void:
 				var i := int(a.substr(4)) - 1
 				if i >= 0 and i < BUILD_ITEMS.size():
 					build_index = i
-					build_mode = true
+					_set_build_mode(true)
+					preview_dist = _find_good_preview_dist()
+					_equip_build_slot(i)
 					_refresh_preview()
+			elif a.begins_with("hot"):
+				var i := int(a.substr(3)) - 1
+				_select_hotbar(i)
+
+
+# ——————————————— 快捷物品栏 ———————————————
+## 重建槽位表：3 件武器 + 3 项建筑，取前 4 个能装下的组合。
+## 为什么是"武器在前、建筑在后"：探索采集占玩家 80% 的时间，武器必须零成本可及；
+## 建筑放后面，进建造模式时会被 _equip_build_slot() 临时顶到第 1 格。
+func _rebuild_hotbar() -> void:
+	var slots: Array = []
+	var n: int = WeaponsS.count()
+	for i in n:
+		if slots.size() >= 4:
+			break
+		var w: Dictionary = WeaponsS.get_at(i)
+		slots.append({
+			"kind": SLOT_WEAPON,
+			"id": str(w.get("id", "")),
+			"name": str(w.get("name", "武器")),
+			"label": str(w.get("name", "武器")),
+		})
+	for i in BUILD_ITEMS.size():
+		if slots.size() >= 4:
+			break
+		var it: Dictionary = BUILD_ITEMS[i]
+		slots.append({
+			"kind": SLOT_BUILD,
+			"id": str(it.get("make", "")),
+			"name": str(it.get("name", "建筑")),
+			"label": str(it.get("name", "建筑")),
+			"build_index": i,
+		})
+	hotbar = slots
+	hotbar_sel = clampi(hotbar_sel, 0, maxi(0, hotbar.size() - 1))
+	_sync_hotbar()
+
+
+func _sync_hotbar() -> void:
+	if GameBus == null:
+		return
+	GameBus.sync_hotbar(hotbar, hotbar_sel)
+
+
+func _slot(i: int) -> Dictionary:
+	if i < 0 or i >= hotbar.size():
+		return {}
+	return hotbar[i]
+
+
+## 点选物品栏某一格：按槽位类型落到 player.weapon_idx 或 build_index 上
+func _select_hotbar(i: int) -> void:
+	var s := _slot(i)
+	if s.is_empty():
+		return
+	var kind := str(s.get("kind", SLOT_EMPTY))
+	if kind == SLOT_EMPTY:
+		hud.toast("第 %d 格是空的" % (i + 1))
+		return
+	hotbar_sel = i
+	if kind == SLOT_WEAPON:
+		# 选武器 = 退出建造模式，避免"拿着斧头还在建造"
+		if build_mode:
+			_set_build_mode(false)
+			_refresh_preview()
+		_equip_weapon(str(s.get("id", "")))
+	elif kind == SLOT_BUILD:
+		build_index = int(s.get("build_index", 0))
+		_set_build_mode(true)
+		preview_dist = _find_good_preview_dist()
+		_refresh_preview()
+	_sync_hotbar()
+
+
+## 建造模式开关的唯一出口：顺带把状态镜像到 GameBus，
+## 让触控层知道单指拖动该转视角还是该挪建造预览。
+func _set_build_mode(on: bool) -> void:
+	build_mode = on
+	GameBus.build_mode = on
+
+
+## 把 player 的当前武器同步到数据层，并刷新物品栏选中态
+func _equip_weapon(id: String) -> void:
+	var w: Dictionary = WeaponsS.find(id)
+	if w.is_empty():
+		return
+	var n: int = WeaponsS.count()
+	for i in n:
+		if str(WeaponsS.get_at(i).get("id", "")) == id:
+			player.weapon_idx = i
+			break
+	GameBus.tool_changed.emit(player.weapon_name())
+	hud.set_weapon("武器：" + player.weapon_name() + _hint("（Q 切换）", ""))
+	_sync_sel_to_weapon()
+
+
+## 按当前手持武器反推应该高亮哪一格
+func _sync_sel_to_weapon() -> void:
+	for i in hotbar.size():
+		var s: Dictionary = hotbar[i]
+		if str(s.get("kind", "")) == SLOT_WEAPON and str(s.get("id", "")) == player.weapon_id():
+			hotbar_sel = i
+			_sync_hotbar()
+			return
+
+
+## 切武器：既改 player 也改高亮，两者始终一致
+func _cycle_held_weapon(dir: int) -> void:
+	player.cycle_weapon(dir)
+	hud.toast("武器：" + player.weapon_name())
+	_sync_sel_to_weapon()
+
+
+## 进建造模式：把当前建筑临时塞到第 1 格并选中，用完 _restore_hotbar_after_build() 还原
+func _equip_build_slot(bi: int) -> void:
+	if bi < 0 or bi >= BUILD_ITEMS.size():
+		return
+	var it: Dictionary = BUILD_ITEMS[bi]
+	hotbar_sel = 0
+	_sync_hotbar()
+	hud.toast("建造：" + str(it.get("name", "")))
+
+
+func _restore_hotbar_after_build() -> void:
+	_sync_sel_to_weapon()
 
 
 # ——————————————— 战斗 ———————————————
 ## 挥砍一次：判定前方扇形内最近的一只可狩猎动物
 func _attack() -> void:
+	var beast := _find_critter_in_arc(player.global_position, player.aim_dir(), false)
+	if beast == null:
+		# 没打到也要挥出去，否则触屏连点毫无反馈
+		player.start_attack()
+		return
+	_attack_at(beast)
+
+
+## 对指定目标出手。扇形判定已在 _find_critter_in_arc 里做完了，这里只做伤害结算。
+func _attack_at(beast: Huntable) -> void:
 	var w: Dictionary = player.start_attack()
 	if w.is_empty():
 		return                       # 冷却未好 / 无武器
 
-	var origin := player.global_position
-	var face: Vector3 = player.facing()
-	var reach: float = float(w.get("reach", 2.6))
-	var arc: float = float(w.get("arc", 0.6))
 	var dmg: int = int(w.get("dmg", 10))
+	var res: Dictionary = beast.take_hit(dmg, player.global_position)
+	if bool(res.get("dead", false)):
+		hud.toast("猎获！")
+	else:
+		hud.toast("命中 -%d" % dmg)
+
+
+## 扇形内最近的动物。
+## padded = true 时额外放宽射程 TAP_ATTACK_PAD——触屏点选是"我指哪打哪"，
+## 手指没有准星精度，用桌面端的严格 reach 会导致大量落空。
+func _find_critter_in_arc(origin: Vector3, dir: Vector3, padded: bool) -> Huntable:
+	var w: Dictionary = player.weapon()
+	var reach: float = float(w.get("reach", 2.6))
+	if padded:
+		reach += TAP_ATTACK_PAD
+	var arc: float = float(w.get("arc", 0.6))
 
 	var best: Huntable = null
-	var best_d := reach
+	# 注意 best_d 必须让"命中盒放宽"也算进去，否则会出现这种矛盾：
+	# 距离检查用的是 reach + hit_radius（够得着），但 best_d 仍是 reach（被判出局），
+	# 结果贴脸站着的大动物反而打不到。所以初值给一个大到不会被误判的上界。
+	var best_d := INF
 	for c in critters:
 		if not is_instance_valid(c):
 			continue
 		var h := c as Huntable
 		if h == null or h.is_dead():
 			continue
-		var to := h.global_position - origin
+		var to: Vector3 = h.global_position - origin
 		to.y = 0.0
-		var d := to.length()
+		var d: float = to.length()
 		# 命中盒：动物半径算进去，大动物更容易被打到
 		if d > reach + h.hit_radius:
 			continue
 		if d > 0.01:
-			var cos_a := face.dot(to.normalized())
+			var cos_a: float = dir.dot(to.normalized())
 			if cos_a < cos(arc):
 				continue
 		if d < best_d:
 			best_d = d
 			best = h
+	return best
 
-	if best == null:
-		return
 
-	var res: Dictionary = best.take_hit(dmg, origin)
-	if bool(res.get("dead", false)):
-		hud.toast("猎获！")
-	else:
-		hud.toast("命中 -%d" % dmg)
+## 扇形内最近的资源节点。资源不会跑，判定比动物宽容：
+## 角度放宽到 TAP_ARC，距离用 _nearest_resource 的 3.8 上限再松一点。
+func _find_resource_in_arc(origin: Vector3, dir: Vector3) -> Node3D:
+	var best: Node3D = null
+	var bd := 5.6
+	for n in resources:
+		if not is_instance_valid(n):
+			continue
+		var to: Vector3 = n.global_position - origin
+		to.y = 0.0
+		var d: float = to.length()
+		if d > bd:
+			continue
+		if d > 0.01:
+			var cos_a: float = dir.dot(to.normalized())
+			if cos_a < cos(TAP_ARC):
+				continue
+		bd = d
+		best = n
+	return best
 
 
 ## 返回附近可攻击动物的中文名（无则空串）。用于准星附近的交互提示。
@@ -716,6 +994,8 @@ func _refresh_preview() -> void:
 	for mi in _all_meshes(preview):
 		mi.transparency = 0.5
 	add_child(preview)
+	# 立刻摆到正前方，避免第一帧出现在原点
+	_set_preview_pos(_preview_in_front())
 
 
 func _all_meshes(root: Node) -> Array:
@@ -821,7 +1101,7 @@ func _process(dt: float) -> void:
 		var beast := _nearest_critter()
 		if n != null:
 			var kind: String = n.get_meta("resource", "wood")
-			hud.set_prompt(_hint("[E] 采集 %s  ×%d", "采集 %s  ×%d") % [hud.RES_NAME[kind], int(n.get_meta("amount", 1))])
+			hud.set_prompt(_hint("[E] 采集 %s  ×%d", "点击采集 %s  ×%d") % [hud.RES_NAME[kind], int(n.get_meta("amount", 1))])
 		elif beast != null:
 			hud.set_prompt(_hint("[左键] 攻击 %s　[Q] 换武器", "点击攻击 %s　换武器") % beast)
 		else:
@@ -835,14 +1115,17 @@ func _process(dt: float) -> void:
 		var cost_txt := ""
 		for k in item.cost:
 			cost_txt += "%s%d " % [hud.RES_NAME[k], int(item.cost[k])]
+		var ok_now := _place_ok(_preview_in_front(), 1.0) if GameBus.touch_enabled else true
+		var tip := "可放置" if ok_now else "此处放不下"
 		hud.set_prompt(_hint("建造模式：左键放置 %s（%s）  [R]旋转  [Esc]退出",
-			"建造模式：点「放置」确认 %s（%s）「旋转」转向") % [item.name, cost_txt])
+			"建造模式：拖动调整位置 · 点「放置」确认 %s（%s）· %s") % [item.name, cost_txt, tip])
 
 	if build_mode and preview != null:
+		# 触控：预览固定在视线前方 preview_dist 处，由拖动/轻点调整；
+		# 桌面：跟随鼠标地面射线，保持原有手感。
 		var g := _preview_in_front() if GameBus.touch_enabled else _pick_ground(get_viewport().get_mouse_position())
 		if g != Vector3.ZERO:
-			preview.global_position = g
-			preview.rotation.y = preview_rot
+			_set_preview_pos(g)
 			var ok := _place_ok(g, 1.0) and _can_afford(BUILD_ITEMS[build_index].cost)
 			for mi in _all_meshes(preview):
 				mi.transparency = 0.45 if ok else 0.8

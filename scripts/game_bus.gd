@@ -24,6 +24,9 @@ var pending_load_slot := -1
 # 桌面端恒为初始值，因此所有读它的逻辑在桌面行为不变。
 signal touch_action(action: String)   ## 触控按钮触发的逻辑动作名，与键盘动作一一对应
 signal touch_layout_changed(w: float, h: float, k: float)   ## 视口尺寸变化，HUD 需同步避让
+signal touch_tap(pos: Vector2)        ## 屏幕轻点（位移小于阈值），main 侧就近判定采集 / 攻击
+signal touch_build_drag(rel: Vector2) ## 建造模式下的单指拖动位移，main 侧换算成预览前后移动
+signal hotbar_changed(slots: Array, sel: int)   ## 物品栏内容或选中项变化，TouchControls 据此刷新
 
 var touch_enabled := false      ## TouchControls 是否已挂载
 var touch_move := Vector2.ZERO  ## 虚拟摇杆向量，y 为负表示向前
@@ -31,12 +34,18 @@ var touch_look := Vector2.ZERO  ## 本帧视角位移，由 player 消费后清�
 var touch_zoom := 0.0           ## 本帧缩放增量，正值拉远，消费后清零
 var touch_run := false          ## 摇杆推满即奔跑
 var touch_jump_edge := false    ## 跳跃边沿，由 player 消费后清零
+var build_mode := false         ## 建造模式镜像，由 main 同步；触控层据此决定拖动语义
 
 var modules := {}
 
 
 func request_touch_action(action: String) -> void:
 	touch_action.emit(action)
+
+
+## main 侧下发物品栏内容：slots 为字典数组，sel 为选中下标
+func sync_hotbar(slots: Array, sel: int) -> void:
+	hotbar_changed.emit(slots, sel)
 
 
 func register_module(id: String, node: Node) -> void:

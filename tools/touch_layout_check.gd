@@ -30,21 +30,26 @@ func _ready() -> void:
 	var vs := get_viewport().get_visible_rect().size
 	print("==== TOUCH LAYOUT CHECK %dx%d ====" % [vs.x, vs.y])
 
-	# HUD 保留区（触摸模式重排后的实际矩形）
-	var reserved := [
-		Rect2(hud.res_label.position, hud.res_label.size),
-		Rect2(hud.clock_label.position, hud.clock_label.size),
-		Rect2(hud.season_label.position, hud.season_label.size),
-		Rect2(hud.prompt_label.position, hud.prompt_label.size),
-		Rect2(hud.build_label.position, hud.build_label.size),
-	]
+	# HUD 保留区（触摸模式重排后的实际矩形）—— 取面板层，不含其内部标签
+	var reserved: Array = hud.touch_reserved_rects()
+
+	var bad := 0
+	# 0) HUD 自身各块不得互相重叠。
+	# 注意：面板"包含"自己的文字标签是正常设计，不算重叠——
+	# 只有「部分交叠」（两边都有露在外面的部分）才是布局事故。
+	for i in reserved.size():
+		for j in range(i + 1, reserved.size()):
+			var ra: Rect2 = reserved[i]
+			var rb: Rect2 = reserved[j]
+			if _partial_overlap(ra, rb):
+				print("FAIL HUD SELF overlap %s vs %s" % [ra, rb])
+				bad += 1
 
 	var btns := []
 	for c in tc.get_children():
 		if c is Button:
 			btns.append(c)
 
-	var bad := 0
 	# 1) 按钮两两不得重叠
 	for i in btns.size():
 		for j in range(i + 1, btns.size()):
@@ -69,6 +74,56 @@ func _ready() -> void:
 		if _rect_circle(bb.get_global_rect(), jc, jr_radius):
 			print("FAIL JOY vs btn '%s'" % bb.text)
 			bad += 1
+	# 4) 所有控件必须留在屏幕内（拖动定位后的摇杆最容易跑出去）
+	for c in tc.get_children():
+		if c is Control:
+			var cr: Rect2 = c.get_global_rect()
+			if cr.position.x < -1.0 or cr.position.y < -1.0 or cr.end.x > vs.x + 1.0 or cr.end.y > vs.y + 1.0:
+				print("FAIL OFFScreen '%s' rect=%s vs=%s" % [c.name if c.name != "" else c.get_class(), cr, vs])
+				bad += 1
+	# 5) 物品栏：4 格必须在底部、且在屏幕内
+	if tc._hotbar_btns.size() != 4:
+		print("FAIL HOTBAR count=%d (expect 4)" % tc._hotbar_btns.size())
+		bad += 1
+	else:
+		for i in tc._hotbar_btns.size():
+			var hb: Button = tc._hotbar_btns[i]
+			var hr: Rect2 = hb.get_global_rect()
+			if hr.end.y > vs.y + 1.0 or hr.end.x > vs.x + 1.0:
+				print("FAIL HOTBAR cell%d out of screen %s" % [i + 1, hr])
+				bad += 1
+			if hr.position.y < vs.y * 0.5:
+				print("FAIL HOTBAR cell%d not at bottom %s" % [i + 1, hr])
+				bad += 1
+	# 6) 物品栏同步：模拟 main 下发一次，看格子文字有没有跟上
+	GameBus.sync_hotbar([
+		{"kind": "weapon", "id": "axe", "name": "斧头", "label": "斧头"},
+		{"kind": "weapon", "id": "spear", "name": "长矛", "label": "长矛"},
+		{"kind": "empty", "id": "", "name": "", "label": ""},
+		{"kind": "empty", "id": "", "name": "", "label": ""},
+	], 1)
+	if tc._hotbar_btns.size() == 4:
+		if not tc._hotbar_btns[0].text.contains("斧头"):
+			print("FAIL HOTBAR sync slot1 text='%s'" % tc._hotbar_btns[0].text)
+			bad += 1
+		if not tc._hotbar_btns[1].text.contains("长矛"):
+			print("FAIL HOTBAR sync slot2 text='%s'" % tc._hotbar_btns[1].text)
+			bad += 1
+	# 7) 摇杆拖动落位：模拟挪到屏幕 40% 处，检查比例是否被正确记录
+	var want := Vector2(vs.x * 0.4, vs.y * 0.55)
+	tc._move_joy_to(want)
+	tc._commit_joy_pos()
+	if absf(tc._joy_pos_ratio.x - 0.4) > 0.02 or absf(tc._joy_pos_ratio.y - 0.55) > 0.02:
+		print("FAIL JOY commit ratio=%s (expect ~0.40, 0.55)" % tc._joy_pos_ratio)
+		bad += 1
+	# 落位后重建布局，摇杆中心应贴近目标点
+	tc._rebuild()
+	var jc2: Vector2 = tc.get_child(0).position + tc.get_child(0).size * 0.5
+	if jc2.distance_to(want) > 2.0:
+		print("FAIL JOY rebuild center=%s (expect %s)" % [jc2, want])
+		bad += 1
+	# 复位，别把测试结果写进真实设置
+	tc.reset_joy_position()
 
 	print("buttons=%d joy_center=(%.0f, %.0f) joy_r=%.0f k=%.2f" % [btns.size(), jc.x, jc.y, jr_radius, tc._k])
 	print("==== CHECK %s bad=%d ====" % ["PASS" if bad == 0 else "FAIL", bad])
@@ -77,6 +132,16 @@ func _ready() -> void:
 
 func _overlap(a: Rect2, b: Rect2) -> bool:
 	return a.intersects(b) and a.intersection(b).get_area() > 1.0
+
+
+## 部分交叠：两边都有露在外面的部分。
+## 一块完全包住另一块（面板 ⊃ 标签）不算——那是正常的层级关系。
+func _partial_overlap(a: Rect2, b: Rect2) -> bool:
+	if not _overlap(a, b):
+		return false
+	if a.encloses(b) or b.encloses(a):
+		return false
+	return true
 
 
 ## 解析 --size 1440x810（兜底用，headless 下 --resolution 无效）

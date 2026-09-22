@@ -54,6 +54,10 @@ func setup(terr: Node3D, obs: Array, spawn2: Vector2) -> void:
 	terrain = terr
 	obstacles = obs
 	global_position = Vector3(spawn2.x, terr.height_at(spawn2.x, spawn2.y) + 0.1, spawn2.y)
+	# 开局让身体朝向与相机一致。否则 model.rotation.y 停在 0，
+	# 而相机在局部 +Z 侧朝 -Z 看，玩家一开局就是"背对相机站着"，
+	# 建造预览会直接落在身后。朝向 = 相机朝向（aim_dir），即 yaw + PI。
+	model.rotation.y = yaw + PI
 
 
 func _mi(mesh: Mesh, m: Material, pos := Vector3.ZERO, rot := Vector3.ZERO, scl := Vector3.ONE) -> MeshInstance3D:
@@ -259,6 +263,11 @@ func weapon_name() -> String:
 	return WeaponsS.name_of(str(weapon().get("id", "")))
 
 
+## 当前武器的稳定 id（用于物品栏反查高亮格）
+func weapon_id() -> String:
+	return str(weapon().get("id", ""))
+
+
 ## 切到下一把武器，返回新武器名
 func cycle_weapon(dir := 1) -> String:
 	weapon_idx = WeaponsS.cycle(weapon_idx, dir)
@@ -290,6 +299,22 @@ func start_attack() -> Dictionary:
 func facing() -> Vector3:
 	var y := model.rotation.y if model != null else yaw
 	return Vector3(sin(y), 0.0, cos(y))
+
+
+## 相机朝向的水平前方单位向量 —— "玩家看着哪"。
+##
+## 【为什么攻击/建造都以它为准，而不是 facing()】
+## facing() 读的是 model.rotation.y，那个值有两个问题：
+##   1. 它是被移动方向驱动的（W 键 → 局部 -Z），玩家站着不动时它永远停在
+##      上一次移动的朝向，甚至在开局时还是 0（正对相机，方向全反）。
+##   2. 它是插值跟随的（lerp 0.22），转身时明显滞后。
+## 而相机朝向由鼠标右键 / 触屏拖动直接驱动，永远即时且与视线一致。
+## 视觉上"看着它"和"打中它"必须一致，所以以相机为准。
+func aim_dir() -> Vector3:
+	if cam_yaw == null:
+		return facing()
+	var y := cam_yaw.rotation.y
+	return Vector3(-sin(y), 0.0, -cos(y))
 
 
 func _update_combat(dt: float) -> void:

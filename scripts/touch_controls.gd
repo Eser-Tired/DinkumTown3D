@@ -1,55 +1,73 @@
 extends CanvasLayer
 class_name TouchControls
-## 移动端触控层
+## 移动端触控层 —— 左摇杆（位置可拖）/ 底部物品栏 / 右侧动作键 / 点击交互
 ##
-## 组成：
-##   1. 左下虚拟摇杆 —— 移动；推到边缘自动奔跑
-##   2. 空白处单指拖拽 —— 转视角 / 俯仰（对应桌面右键拖拽）
-##   3. 双指捏合 —— 拉近拉远（对应桌面滚轮）
-##   4. 右侧 / 中下的功能按钮 —— 与桌面键盘动作一一对应
+## 【布局分区】
+##   左下  虚拟摇杆 —— 移动，推满自动奔跑。**长按 0.35 秒可拖动重新定位**，
+##         位置按屏幕比例持久化到 user://settings.cfg
+##   底部  4 格快捷物品栏 + 背包按钮 + 建造按钮
+##   右侧  跳跃键 + 使用键（攻击/工具，随当前手持物变化）+ 农事键
+##   空白  单指拖拽转视角、双指捏合缩放、轻点（位移小于阈值的点按）触发交互
 ##
-## 输出走 GameBus.touch_* 通道，player / main 把它当作「额外输入源」消费，
+## 【为什么把「采集」并入点击】用户要求"人物靠近直接触屏点击采集"。
+## 独立按钮会占掉右下最宝贵的大拇指热区，而且采集/攻击在操作语义上是同一件事
+## （对最近的可交互目标出手）。所以合并成"点屏幕"一个手势，由 main 侧判断
+## 打到的是资源还是动物。
+##
+## 【为什么不与拖拽转视角冲突】看 _on_touch/_on_drag 的距离阈值判定：
+## 按下到抬起位移 < TAP_SLOP 才算"点击"，否则一律当作视角拖拽。
+##
+## 输出走 GameBus.touch_* 通道，player / main 当作额外输入源消费，
 ## 所以桌面端（不挂本节点）行为完全不变。
 ##
-## 桌面验证：启动时加 --touch-ui，会强制挂载并开启鼠标模拟触摸。
+## 桌面验证：启动加 --touch-ui，会强制挂载并开启鼠标模拟触摸。
 
-const REF := Vector2(1440.0, 810.0)   # 布局参考分辨率（= 桌面视口）
+const REF := Vector2(1440.0, 810.0)   # 布局参考分辨率
+const SETTINGS_PATH := "user://settings.cfg"
 
-const BTN_SYS := [
-	{"t": "存", "a": "save"},
-	{"t": "读", "a": "load"},
-	{"t": "作物", "a": "crop"},
-	{"t": "加速", "a": "time"},
-	{"t": "静音", "a": "mute"},
-	{"t": "帮助", "a": "help"},
-]
-
-const BTN_PICK := [
-	{"t": "篝火", "a": "pick1"},
-	{"t": "帐篷", "a": "pick2"},
-	{"t": "栅栏", "a": "pick3"},
-	{"t": "路灯", "a": "pick4"},
-]
+## 轻点判定阈值（像素，按 k 缩放）：按下到抬起的位移小于它算点击
+const TAP_SLOP := 18.0
+## 长按进入「拖动摇杆」所需的时长
+const LONG_PRESS := 0.35
 
 var _joy: JoyPad
 var _joy_r := 92.0
 var _joy_id := -1
-var _active := {}          ## index -> Vector2，参与「视角 / 捏合」的手指
+var _active := {}              ## index -> Vector2，参与「视角 / 捏合」的手指
 var _pinch_prev := 0.0
+
+## 摇杆自定义位置（屏幕比例 0..1，左上为原点；-1 表示用默认贴边位置）
+var _joy_pos_ratio := Vector2(-1.0, -1.0)
+var _dragging_joy := false
+var _joy_press_t := 0.0
+var _joy_press_at := Vector2.ZERO
+
+## 轻点检测：记录按下位置
+var _tap_id := -1
+var _tap_from := Vector2.ZERO
 
 var _btn_rects: Array = []
 var _k := 1.0
 var _vs := REF
+
+## 快捷物品栏格子状态（由 main 通过 set_hotbar() 同步）
+var _hotbar: Array = []
+var _hotbar_sel := 0
+var _hotbar_btns: Array = []
 
 
 func _ready() -> void:
 	layer = 20
 	name = "TouchControls"
 	GameBus.touch_enabled = true
+	_load_settings()
+
 	_joy = JoyPad.new()
 	_joy.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_joy)
+
 	get_viewport().size_changed.connect(_rebuild)
+	GameBus.hotbar_changed.connect(_on_hotbar_changed)
 	_rebuild()
 
 
@@ -59,6 +77,32 @@ func _exit_tree() -> void:
 	GameBus.touch_look = Vector2.ZERO
 	GameBus.touch_zoom = 0.0
 	GameBus.touch_run = false
+
+
+# ——————————————— 设置持久化 ———————————————
+func _load_settings() -> void:
+	var cf := ConfigFile.new()
+	if cf.load(SETTINGS_PATH) != OK:
+		return
+	_joy_pos_ratio = Vector2(
+		float(cf.get_value("touch", "joy_x", -1.0)),
+		float(cf.get_value("touch", "joy_y", -1.0))
+	)
+
+
+func _save_joy_pos() -> void:
+	var cf := ConfigFile.new()
+	cf.load(SETTINGS_PATH)              # 保留主界面写入的音量/画质等
+	cf.set_value("touch", "joy_x", _joy_pos_ratio.x)
+	cf.set_value("touch", "joy_y", _joy_pos_ratio.y)
+	cf.save(SETTINGS_PATH)
+
+
+## 供设置界面调用：恢复默认贴边位置
+func reset_joy_position() -> void:
+	_joy_pos_ratio = Vector2(-1.0, -1.0)
+	_save_joy_pos()
+	_rebuild()
 
 
 # ——————————————— 布局（锚点式） ———————————————
@@ -74,52 +118,70 @@ func _rebuild() -> void:
 	var k := _k
 
 	_btn_rects.clear()
+	_hotbar_btns.clear()
 	for c in get_children():
 		if c != _joy:
 			c.queue_free()
 
-	# —— 虚拟摇杆：锚左下 ——
+	# —— 虚拟摇杆：默认锚左下；有自定义比例则按比例定位 ——
 	_joy_r = 92.0 * k
 	_joy.size = Vector2(_joy_r * 2.6, _joy_r * 2.6)
-	_joy.position = Vector2(46.0 * k, H - _joy_r * 2.6 - 40.0 * k)
+	if _joy_pos_ratio.x >= 0.0 and _joy_pos_ratio.y >= 0.0:
+		# 自定义位置存的是「摇杆中心」的屏幕比例，转成左上角坐标
+		var ctr := Vector2(_joy_pos_ratio.x * W, _joy_pos_ratio.y * H)
+		_joy.position = ctr - _joy.size * 0.5
+	else:
+		_joy.position = Vector2(46.0 * k, H - _joy_r * 2.6 - 40.0 * k)
 	_joy.set_center_radius(_joy_r)
 	_joy.queue_redraw()
 
-	# —— 顶部系统小钮：锚左上，起点让过资源面板（面板固定像素宽 268，小屏 k 缩不放它）——
-	# 资源面板是 HUD 的固定像素宽(34+230)；这里约束的是按钮「左边界」而非中心
-	var sys_w := 76.0 * k
-	var sys_x0 := maxf(306.0 * k, 286.0) + sys_w * 0.5
-	var i := 0
-	for d in BTN_SYS:
-		_btn_at(d.t, d.a, sys_x0 + i * 90.0 * k, 46.0 * k, sys_w, 56.0 * k, 19)
-		i += 1
+	# —— 左侧竖排小钮：背包 / 建造 ——
+	# 必须整块避开摇杆命中圆（_joy_r*1.2），否则测试和手感上都会被摇杆吃掉。
+	# 摇杆默认中心 y ≈ H - joy_r*1.3 - 40k，命中半径 joy_r*1.2，
+	# 所以小钮的底部要落到「摇杆中心 - 摇杆命中半径」以上。
+	var sw := 84.0 * k
+	var sx := 58.0 * k
+	var jc_y := H - _joy_r * 1.3 - 40.0 * k        # 摇杆中心（默认贴边时）
+	var col_bottom := jc_y - _joy_r * 1.2 - 14.0 * k
+	_btn_at("背包", "bag", sx, col_bottom - 78.0 * k, sw, 62.0 * k, 18)
+	_btn_at("建造", "build", sx, col_bottom, sw, 62.0 * k, 18)
 
-	# —— 建筑选择 1-4：锚中下 ——
-	var bw := 140.0 * k
-	var gap := 12.0 * k
-	var bx := (W - (4.0 * bw + 3.0 * gap)) * 0.5
-	i = 0
-	for d in BTN_PICK:
-		_btn_at(d.t, d.a, bx + (i + 0.5) * bw + i * gap, H - 87.0 * k, bw, 54.0 * k, 19)
-		i += 1
+	# —— 底部快捷物品栏：4 格 + 居中 ——
+	var cell := 88.0 * k
+	var gap := 8.0 * k
+	var total_w := 4.0 * cell + 3.0 * gap
+	var hx := (W - total_w) * 0.5
+	var hy := H - 106.0 * k
+	for i in 4:
+		_make_hotbar_cell(i, hx + i * (cell + gap), hy, cell, cell)
+	_refresh_hotbar()
 
-	# —— 右侧建造控制列：锚右 ——
-	var colw := 148.0 * k
-	var colx := W - 74.0 * k - colw * 0.5
-	_btn_at("放置", "place", colx, 196.0 * k, colw, 64.0 * k, 21)
-	_btn_at("建造", "build", colx, 266.0 * k, colw, 64.0 * k, 21)
-	_btn_at("旋转", "rotate", colx, 336.0 * k, colw, 64.0 * k, 21)
+	# —— 右上：系统小钮 ——
+	# 【跨文件约定】HUD 右侧竖列（时钟/季节/武器）在触控模式下占到 y ≈ 182k，
+	# 所以这里从 SYS_ROW1 = 210k 起，绝不上探。改这边要同步看 hud.set_touch_mode()。
+	# 两行：210k / 268k，下排底边 268k+26k = 294k；
+	# 「旋转」放 350k，与系统钮留出 30k 以上间隙。
+	var SYS_ROW1 := 210.0
+	var SYS_ROW2 := 268.0
+	_make_sys_button("存", "save", W - 200.0 * k, SYS_ROW1 * k, 84.0 * k, 52.0 * k)
+	_make_sys_button("读", "load", W - 108.0 * k, SYS_ROW1 * k, 84.0 * k, 52.0 * k)
+	_make_sys_button("加速", "time", W - 200.0 * k, SYS_ROW2 * k, 84.0 * k, 52.0 * k)
+	_make_sys_button("静音", "mute", W - 108.0 * k, SYS_ROW2 * k, 84.0 * k, 52.0 * k)
 
-	# —— 右下主动作圆钮：锚右下 ——
-	_btn_at("采集", "harvest", W - 130.0 * k, H - 150.0 * k, 132.0 * k, 132.0 * k, 23)
-	_btn_at("农事", "farm", W - 300.0 * k, H - 110.0 * k, 116.0 * k, 116.0 * k, 21)
-	_btn_at("跳", "jump", W - 90.0 * k, H - 330.0 * k, 104.0 * k, 104.0 * k, 21)
+	# —— 右侧动作区：跳 / 使用 / 农事 ——
+	# 「使用」是最大最靠拇指的主键；跳在它上方；农事在它左侧。
+	_btn_at("使用", "use", W - 128.0 * k, H - 168.0 * k, 140.0 * k, 140.0 * k, 24)
+	_btn_at("跳", "jump", W - 264.0 * k, H - 246.0 * k, 108.0 * k, 108.0 * k, 21)
+	_btn_at("农事", "farm", W - 300.0 * k, H - 112.0 * k, 104.0 * k, 104.0 * k, 19)
+	# 建造模式专用：旋转 / 放置。放在系统钮下方，与 HUD 竖列彻底分离。
+	_btn_at("旋转", "rotate", W - 128.0 * k, 350.0 * k, 118.0 * k, 58.0 * k, 19)
+	_btn_at("放置", "place", W - 128.0 * k, 416.0 * k, 118.0 * k, 58.0 * k, 19)
 
 	GameBus.touch_layout_changed.emit(W, H, k)
 
 
 ## 中心点 + 尺寸创建按钮（区别于 Godot 的左上角定位）
-func _btn_at(text: String, action: String, cx: float, cy: float, w: float, h: float, fs: int) -> void:
+func _btn_at(text: String, action: String, cx: float, cy: float, w: float, h: float, fs: int) -> Button:
 	var b := Button.new()
 	b.text = text
 	b.add_theme_font_size_override("font_size", maxi(10, int(fs * _k)))
@@ -132,6 +194,14 @@ func _btn_at(text: String, action: String, cx: float, cy: float, w: float, h: fl
 	b.pressed.connect(func(): GameBus.request_touch_action(act))
 	add_child(b)
 	_btn_rects.append(Rect2(b.position, sz))
+	return b
+
+
+## 系统小钮样式（更暗，与动作键区分层级）
+func _make_sys_button(text: String, action: String, cx: float, cy: float, w: float, h: float) -> Button:
+	var b := _btn_at(text, action, cx, cy, w, h, 17)
+	_style(b, Color(0.08, 0.10, 0.14, 0.46), Color(0.14, 0.20, 0.28, 0.72))
+	return b
 
 
 func _style(b: Button, normal: Color, pressed: Color) -> void:
@@ -148,6 +218,46 @@ func _style(b: Button, normal: Color, pressed: Color) -> void:
 	b.add_theme_stylebox_override("pressed", p)
 	b.add_theme_color_override("font_color", Color(1, 1, 1, 0.96))
 	b.add_theme_color_override("font_pressed_color", Color(1, 1, 1, 1.0))
+
+
+# ——————————————— 快捷物品栏 ———————————————
+## main 侧通过 GameBus.sync_hotbar(slots, sel) 同步：
+##   slots = [{kind:"weapon"/"empty", id:"axe", name:"斧头", label:"斧"}, ...]
+##   sel   = 当前选中格下标
+func _on_hotbar_changed(slots: Array, sel: int) -> void:
+	_hotbar = slots
+	_hotbar_sel = sel
+	_refresh_hotbar()
+
+
+func _make_hotbar_cell(i: int, x: float, y: float, w: float, h: float) -> void:
+	var b := Button.new()
+	b.focus_mode = Control.FOCUS_NONE
+	b.size = Vector2(w, h)
+	b.position = Vector2(x, y)
+	b.add_theme_font_size_override("font_size", maxi(10, int(16 * _k)))
+	var idx := i
+	b.pressed.connect(func(): GameBus.request_touch_action("hot%d" % (idx + 1)))
+	add_child(b)
+	_hotbar_btns.append(b)
+	_btn_rects.append(Rect2(b.position, b.size))
+
+
+func _refresh_hotbar() -> void:
+	for i in _hotbar_btns.size():
+		var b: Button = _hotbar_btns[i]
+		var sel := (i == _hotbar_sel)
+		var slot: Dictionary = _hotbar[i] if i < _hotbar.size() else {}
+
+		if slot.is_empty() or str(slot.get("kind", "empty")) == "empty":
+			b.text = "%d\n—" % (i + 1)
+			_style(b, Color(0.08, 0.10, 0.14, 0.34), Color(0.12, 0.16, 0.22, 0.5))
+		else:
+			b.text = "%d\n%s" % [i + 1, str(slot.get("label", slot.get("name", "?")))]
+			if sel:
+				_style(b, Color(0.62, 0.44, 0.16, 0.86), Color(0.78, 0.58, 0.24, 0.95))
+			else:
+				_style(b, Color(0.10, 0.14, 0.20, 0.58), Color(0.18, 0.27, 0.38, 0.82))
 
 
 # ——————————————— 输入 ———————————————
@@ -174,33 +284,62 @@ func _on_touch(idx: int, pos: Vector2, pressed: bool) -> void:
 	if pressed:
 		if _in_button(pos):
 			return
-		# 摇杆命中圆形区域（略大于视觉半径，手感友好）；按钮已在前面判定过，优先级更高
+		# 摇杆命中圆（略大于视觉半径，手感友好）；按钮已在前面判定过，优先级更高
 		if pos.distance_to(_joy_center()) < _joy_r * 1.2:
 			_joy_id = idx
+			_joy_press_t = 0.0
+			_joy_press_at = pos
+			_dragging_joy = false
+			# 按住不动算"长按"→ 进入拖动定位；一动就算推摇杆，看 _on_drag
 			_update_joy(pos)
 			return
+		# 其余按下：先记下落点，抬起时再判定是「轻点」还是「拖视角」
 		_active[idx] = pos
+		if _tap_id < 0:
+			_tap_id = idx
+			_tap_from = pos
 		if _active.size() >= 2:
 			_pinch_prev = _pair_distance()
 		return
 
-	# 抬起
+	# —— 抬起 ——
 	if idx == _joy_id:
 		_joy_id = -1
+		_joy_press_t = 0.0
 		_joy.set_knob(Vector2.ZERO)
 		GameBus.touch_move = Vector2.ZERO
 		GameBus.touch_run = false
+		# 松手落位：拖动定位模式下把新位置持久化，否则退出拖动模式还原到原中心
+		if _dragging_joy:
+			_commit_joy_pos()
+		_dragging_joy = false
+		_joy.set_drag_hint(false)
 		return
+
 	if _active.has(idx):
 		_active.erase(idx)
 		if _active.size() < 2:
 			_pinch_prev = 0.0
 
+	# 轻点判定：主触点、总位移小于阈值、没有发生双指操作
+	if idx == _tap_id:
+		_tap_id = -1
+		if _active.is_empty() and pos.distance_to(_tap_from) < TAP_SLOP * _k:
+			GameBus.touch_tap.emit(pos)
+
 
 func _on_drag(idx: int, pos: Vector2, rel: Vector2) -> void:
 	if idx == _joy_id:
-		_update_joy(pos)
+		_joy_press_t += 0.0     # 时间在 _process 里累加
+		# 长按后进入拖动定位：摇杆中心跟随手指
+		if _dragging_joy:
+			_move_joy_to(pos)
+			return
+		# 未进入长按前：正常推摇杆
+		if _joy_press_at.distance_to(pos) > 24.0 * _k:
+			_update_joy(pos)
 		return
+
 	if not _active.has(idx):
 		return
 	_active[idx] = pos
@@ -213,7 +352,44 @@ func _on_drag(idx: int, pos: Vector2, rel: Vector2) -> void:
 		_pinch_prev = d
 		return
 
+	# 建造模式：单指拖动改为挪动建造预览，而不是转视角
+	# （为什么这样分：建造时玩家最想微调的是落点，转视角的诉求可以靠点空白慢慢转）
+	if GameBus.build_mode:
+		GameBus.touch_build_drag.emit(rel)
+		return
+
 	GameBus.touch_look += rel
+
+
+func _process(dt: float) -> void:
+	# 摇杆长按计时：按住不动超过 LONG_PRESS 就切换到「拖动定位」模式
+	if _joy_id >= 0 and not _dragging_joy:
+		_joy_press_t += dt
+		if _joy_press_t >= LONG_PRESS:
+			_dragging_joy = true
+			_joy.set_drag_hint(true)
+	if _joy_id < 0 and _joy.is_drag_hint():
+		_joy.set_drag_hint(false)
+
+
+## 拖动定位：把摇杆中心挪到手指位置，并夹在屏幕内侧（避免半个摇杆跑出屏外）
+func _move_joy_to(pos: Vector2) -> void:
+	var margin := _joy_r * 1.1
+	var c := Vector2(
+		clampf(pos.x, margin, _vs.x - margin),
+		clampf(pos.y, margin, _vs.y - margin)
+	)
+	_joy.position = c - _joy.size * 0.5
+	_joy.queue_redraw()
+
+
+## 松手落位：把当前中心换算成屏幕比例并持久化
+func _commit_joy_pos() -> void:
+	if _vs.x < 8.0 or _vs.y < 8.0:
+		return
+	var c := _joy_center()
+	_joy_pos_ratio = Vector2(c.x / _vs.x, c.y / _vs.y)
+	_save_joy_pos()
 
 
 ## 参与捏合的两指间距；不足两指时返回 0
@@ -240,6 +416,7 @@ func _update_joy(pos: Vector2) -> void:
 class JoyPad extends Control:
 	var _knob := Vector2.ZERO
 	var _r := 92.0
+	var _drag_hint := false
 
 	func set_center_radius(r: float) -> void:
 		_r = r
@@ -249,10 +426,23 @@ class JoyPad extends Control:
 		_knob = k
 		queue_redraw()
 
+	func set_drag_hint(on: bool) -> void:
+		_drag_hint = on
+		queue_redraw()
+
+	func is_drag_hint() -> bool:
+		return _drag_hint
+
 	func _draw() -> void:
 		var c := size * 0.5
-		draw_circle(c, _r, Color(0.85, 0.92, 1.0, 0.13))
-		draw_circle(c, _r, Color(0.85, 0.92, 1.0, 0.26), false, 3.0, true)
-		draw_circle(c, _r * 0.42, Color(0.85, 0.92, 1.0, 0.06))
+		# 进入拖动定位模式时整体变亮 + 加一圈虚线感，提示"可以挪了"
+		var base_a := 0.13
+		var ring_a := 0.26
+		if _drag_hint:
+			base_a = 0.24
+			ring_a = 0.62
+		draw_circle(c, _r, Color(0.85, 0.92, 1.0, base_a))
+		draw_circle(c, _r, Color(0.98, 0.84, 0.52, ring_a), false, 3.0, true)
+		draw_circle(c, _r * 0.42, Color(0.85, 0.92, 1.0, base_a * 0.5))
 		draw_circle(c + _knob, _r * 0.40, Color(1.0, 1.0, 1.0, 0.34))
 		draw_circle(c + _knob, _r * 0.40, Color(1.0, 1.0, 1.0, 0.55), false, 3.0, true)

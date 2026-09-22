@@ -12,6 +12,13 @@ build/
 
 # 自动截图产物（仅项目根；docs/screenshots 下的归档正常跟踪）
 /shot*.png
+/touch_shots/
+/touch_shots*/
+
+# 自检脚本落盘的日志（combat_check.gd / e2e.gd 等）
+/combat_check.log
+/*_check.log
+/*_diag.log
 
 # Godot 生成的导入元数据
 *.import

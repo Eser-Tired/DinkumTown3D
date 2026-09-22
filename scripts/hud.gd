@@ -13,6 +13,23 @@ var toast_label: Label
 var weapon_label: Label
 var toast_t := 0.0
 
+## 右侧竖列（时钟 / 季节 / 武器）的面板引用，触控模式下要整体上移避让
+var _right_panels: Array = []
+## 资源面板引用（触控模式下按 k 重排）
+var res_panel: Panel
+
+## 供自检脚本取触控布局占位矩形用（返回面板层，不含内部标签）
+func touch_reserved_rects() -> Array:
+	var out: Array = []
+	if res_panel != null:
+		out.append(Rect2(res_panel.position, res_panel.size))
+	for p in _right_panels:
+		if p != null:
+			out.append(Rect2(p.position, p.size))
+	out.append(Rect2(prompt_label.position, prompt_label.size))
+	out.append(Rect2(build_label.position, build_label.size))
+	return out
+
 const RES_NAME := {
 	"wood": "木材", "stone": "石头", "fiber": "纤维", "ore": "铁矿石", "food": "食物"
 }
@@ -43,32 +60,39 @@ func _label(size: int, pos: Vector2, width: int) -> Label:
 
 
 func _build() -> void:
-	# 资源栏
-	add_child(_panel(Vector2(18, 16), Vector2(250, 108)))
+	# 资源栏（5 行：木材/石头/纤维/铁矿石/食物）
+	# 高度要够 5 行：行高约 = 字号 * 1.35，再留上下各 10 的内边距。
+	res_panel = _panel(Vector2(18, 16), Vector2(250, 108))
+	add_child(res_panel)
 	res_label = _label(19, Vector2(34, 26), 230)
 	res_label.size = Vector2(230, 96)
 	res_label.text = "资源"
 	add_child(res_label)
 
 	# 时钟
-	add_child(_panel(Vector2(1150, 16), Vector2(226, 62)))
+	var p_clock := _panel(Vector2(1150, 16), Vector2(226, 62))
+	add_child(p_clock)
 	clock_label = _label(20, Vector2(1166, 28), 210)
 	clock_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	add_child(clock_label)
 
 	# 季节 / 天气
-	add_child(_panel(Vector2(1150, 84), Vector2(226, 40), 0.42))
+	var p_season := _panel(Vector2(1150, 84), Vector2(226, 40), 0.42)
+	add_child(p_season)
 	season_label = _label(17, Vector2(1166, 90), 210)
 	season_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	season_label.text = "—"
 	add_child(season_label)
 
-	# 当前武器（右下角，与时钟面板对齐成一列）
-	add_child(_panel(Vector2(1150, 128), Vector2(226, 40), 0.42))
+	# 当前武器（与时钟面板对齐成一列）
+	var p_weapon := _panel(Vector2(1150, 128), Vector2(226, 40), 0.42)
+	add_child(p_weapon)
 	weapon_label = _label(17, Vector2(1166, 134), 210)
 	weapon_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	weapon_label.text = "—"
 	add_child(weapon_label)
+
+	_right_panels = [p_clock, p_season, p_weapon]
 
 	# 交互提示（屏幕中下）
 	prompt_label = _label(22, Vector2(390, 690), 660)
@@ -85,7 +109,7 @@ func _build() -> void:
 	add_child(help_panel)
 	help_label = _label(16, Vector2(34, 650), 540)
 	help_label.size = Vector2(540, 140)
-	help_label.text = "WASD/方向键 移动 · Shift 奔跑 · 空格 跳跃\n鼠标右键拖拽 转视角 · 滚轮 缩放\nE 采集 · 左键 攻击 · Q 换武器\nB 建造模式 · 1-4 选建筑 · 左键放置\nF 农事 · G 换作物 · T 加速时间 · H 隐藏帮助\nF2 保存 · F3 读取 · M 静音"
+	help_label.text = "WASD/方向键 移动 · Shift 奔跑 · 空格 跳跃\n鼠标右键拖拽 转视角 · 滚轮 缩放\nE 采集 · 左键 攻击 · Q 换武器 · 1-4 切物品栏\nB 建造模式 · 建造中 1-4 选建筑 · 左键放置\nF 农事 · G 换作物 · T 加速时间 · H 隐藏帮助\nF2 保存 · F3 读取 · M 静音"
 	add_child(help_label)
 
 	# 浮动提示
@@ -97,19 +121,62 @@ func _build() -> void:
 
 ## 触控模式重排：左下让给摇杆、右侧让给按钮列、说明改写成触控说法
 ## W/H 为当前视口尺寸，k 为触控层缩放系数（由 TouchControls 发出）
+##
+## 【关键约束】桌面的"右侧竖列"是按 1440 宽写死的像素坐标（x=1150），
+## 在别的分辨率下会跑到屏幕外或者压住触控按钮。所以这里必须把整列
+## 按 k 重新贴到右上角，并且只占顶部这一条，把 y > 200k 全让出来。
 func set_touch_mode(w: float, h: float, k: float) -> void:
 	help_label.text = (
-		"左手摇杆贴左下角，向外推满自动奔跑\n"
+		"左下摇杆移动，推满自动奔跑（长按可拖动重新定位）\n"
 		+ "屏幕空白处拖动转视角，双指捏合缩放\n"
-		+ "右下大钮：采集 / 农事 / 跳\n"
-		+ "右侧：放建筑 · 建造开关 · 旋转\n"
-		+ "顶部：存 / 读 / 作物 / 加速 / 静音 / 帮助"
+		+ "点击画面：采集附近的资源 / 攻击动物\n"
+		+ "底栏 4 格：点一下切换武器或建筑\n"
+		+ "右侧：使用（攻击/放置）· 跳 · 农事 · 旋转\n"
+		+ "左上：背包 · 建造　　右上：存 / 读 / 加速 / 静音"
 	)
 	show_help_panel(false)
+
+	# —— 右侧竖列：整体缩放到 k，贴右上 ——
+	# 三块高度 62 / 40 / 40，块间距 6；文字标签比面板再多探出约 12k。
+	# 整列底部（含标签）≈ 16 + 62+6 + 40+6 + 40+12 = 182k。
+	# 触控层的系统按钮从 210k 起，两边不许越界——这个数字是跨文件的约定，
+	# 改动右边任何一处都要同步检查 touch_controls.gd 的 SYS_ROW_Y。
+	const PAD_TOP := 16.0
+	const PAD_X := 18.0
+	const PANEL_W := 226.0
+	const GAP := 6.0
+	var pw := PANEL_W * k
+	var px := w - PAD_X * k - pw
+	var sizes := [62.0, 40.0, 40.0]
+	var labs := [clock_label, season_label, weapon_label]
+	var cy := PAD_TOP * k
+	for i in _right_panels.size():
+		var p: Panel = _right_panels[i]
+		p.position = Vector2(px, cy)
+		p.size = Vector2(pw, sizes[i] * k)
+		var l: Label = labs[i]
+		l.position = Vector2(px + 16.0 * k, cy + 12.0 * k)
+		l.size = Vector2(pw - 32.0 * k, sizes[i] * k)
+		l.add_theme_font_size_override("font_size", maxi(11, int((20 if i == 0 else 17) * k)))
+		cy += (sizes[i] + GAP) * k
+
+	# —— 资源栏：按 k 缩放，贴左上。高度必须放得下 5 行 ——
+	# 字号 19k，Label 默认行高约 1.35 倍，5 行 ≈ 128k；再加 20k 上下边距。
+	var rh := 150.0 * k
+	res_panel.position = Vector2(18.0 * k, 16.0 * k)
+	res_panel.size = Vector2(250.0 * k, rh)
+	res_label.position = Vector2(34.0 * k, 26.0 * k)
+	res_label.size = Vector2(230.0 * k, rh - 20.0 * k)
+	res_label.add_theme_font_size_override("font_size", maxi(12, int(19.0 * k)))
+
+	# —— 提示与建造菜单 ——
+	# 建造菜单放在资源栏正下方，两者间距 10k，绝不重叠。
 	prompt_label.position = Vector2(w * 0.5 - 280.0 * k, h - 175.0 * k)
 	prompt_label.size = Vector2(560.0 * k, 56.0 * k)
-	build_label.position = Vector2(18.0 * k, 142.0 * k)
-	build_label.size = Vector2(330.0 * k, 140.0 * k)
+	var by := 16.0 * k + rh + 12.0 * k
+	build_label.position = Vector2(18.0 * k, by)
+	build_label.size = Vector2(330.0 * k, 170.0 * k)
+	build_label.add_theme_font_size_override("font_size", maxi(11, int(18.0 * k)))
 	build_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 
 
