@@ -137,6 +137,15 @@ func _input(event: InputEvent) -> void:
 
 
 func _process(dt: float) -> void:
+	# —— 触控：视角拖拽 / 双指缩放（读后清零，桌面恒为零值，无副作用）——
+	if GameBus.touch_look != Vector2.ZERO:
+		yaw -= GameBus.touch_look.x * 0.0055
+		pitch = clampf(pitch - GameBus.touch_look.y * 0.004, -1.15, 0.55)
+		GameBus.touch_look = Vector2.ZERO
+	if GameBus.touch_zoom != 0.0:
+		cam_dist = clampf(cam_dist + GameBus.touch_zoom, 3.5, 22.0)
+		GameBus.touch_zoom = 0.0
+
 	cam_yaw.rotation.y = yaw
 	cam_pitch.rotation.x = pitch
 	cam.position.z = lerpf(cam.position.z, cam_dist, 0.15)
@@ -148,14 +157,22 @@ func _process(dt: float) -> void:
 	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN): iz += 1.0
 	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT): ix -= 1.0
 	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT): ix += 1.0
-	var running := Input.is_key_pressed(KEY_SHIFT)
+	var tv := GameBus.touch_move
+	if tv.length() > 0.02:
+		ix += tv.x
+		iz += tv.y
+	ix = clampf(ix, -1.0, 1.0)
+	iz = clampf(iz, -1.0, 1.0)
+	var running := Input.is_key_pressed(KEY_SHIFT) or GameBus.touch_run
 	var dir := Vector3(ix, 0.0, iz)
 	if dir.length() > 0.01:
 		dir = dir.normalized().rotated(Vector3.UP, yaw)
 	var speed := run_speed if running else walk_speed
 
 	# —— 跳跃 ——
-	if Input.is_key_pressed(KEY_SPACE) and on_ground:
+	var want_jump := Input.is_key_pressed(KEY_SPACE) or GameBus.touch_jump_edge
+	GameBus.touch_jump_edge = false
+	if want_jump and on_ground:
 		jump_v = 7.4
 		on_ground = false
 	if not on_ground:

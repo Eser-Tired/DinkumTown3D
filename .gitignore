@@ -1,12 +1,14 @@
 # Godot 4.x
 .godot/
 *.uid
-export_presets.cfg
 export_credentials.cfg
 .import/
 .mono/
 data_*/
 mono_crash.*.json
+
+# 构建产物（发布时作为 release 附件上传）
+build/
 
 # 自动截图产物（仅项目根；docs/screenshots 下的归档正常跟踪）
 /shot*.png

@@ -13,6 +13,7 @@ const AudioS := preload("res://scripts/audio.gd")
 const SeasonS := preload("res://scripts/season.gd")
 const FarmS := preload("res://scripts/farm.gd")
 const SaveS := preload("res://scripts/save_system.gd")
+const TouchS := preload("res://scripts/touch_controls.gd")
 
 const TOWN := Vector2(-14.0, -10.0)
 const LAKE := Vector2(48.0, 22.0)
@@ -119,7 +120,50 @@ func _ready() -> void:
 	if season != null:
 		_on_weather(season.weather)
 
+	_setup_touch()
 	_check_auto_shot()
+
+
+# ——————————————— 移动端触控适配 ———————————————
+func _setup_touch() -> void:
+	var forced := OS.get_cmdline_args().has("--touch-ui")
+	# 只在真正的移动平台自动挂载：Windows 触摸屏笔记本会被 is_touchscreen_available 误判
+	if not OS.has_feature("mobile") and not forced:
+		return
+	# 必须先连接再挂载：TouchControls._ready 会立刻发出首次布局事件，
+	# connect 晚了这一帧就丢了，HUD 将永远停在桌面布局上。
+	GameBus.touch_action.connect(_on_touch_action)
+	GameBus.touch_layout_changed.connect(_on_touch_layout)
+	add_child(TouchS.new())
+	if forced:
+		# 桌面调试：把鼠标当一根手指用
+		ProjectSettings.set_setting("input_devices/pointing/emulate_touch_from_mouse", true)
+
+
+## 视口变化时 HUD 同步避让（首次挂载时 TouchControls 也会 emit 一次）
+func _on_touch_layout(w: float, h: float, k: float) -> void:
+	if hud != null:
+		hud.set_touch_mode(w, h, k)
+
+
+func _on_touch_action(a: String) -> void:
+	_do_action(a)
+
+
+## 菜单 / 提示里的键位说明：触控模式换成不带键位的说法
+func _hint(kbd: String, touch: String) -> String:
+	return touch if GameBus.touch_enabled else kbd
+
+
+## 触控模式没有鼠标射线，建造预览改落在玩家正前方的地面上
+func _preview_in_front() -> Vector3:
+	if player == null or terrain == null:
+		return Vector3.ZERO
+	var yaw: float = player.yaw
+	var off := Vector3(-sin(yaw), 0.0, -cos(yaw)) * 4.5
+	var p := player.global_position + off
+	p.y = terrain.height_at(p.x, p.z)
+	return p
 
 
 ## 雨幕：跟随玩家的粒子柱，weather_changed 驱动
@@ -368,44 +412,71 @@ func _spawn_critters() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
-			KEY_E:
-				_harvest()
-			KEY_B:
-				build_mode = not build_mode
-				_refresh_preview()
-			KEY_1, KEY_2, KEY_3, KEY_4:
-				build_index = event.keycode - KEY_1
-				build_mode = true
-				_refresh_preview()
-			KEY_R:
-				if build_mode:
-					preview_rot += PI * 0.25
-			KEY_F:
-				if farm != null:
-					farm.interact(player.global_position)
-			KEY_F2:
-				if save_sys != null:
-					save_sys.save(1)
-			KEY_F3:
-				if save_sys != null:
-					save_sys.load(1)
-			KEY_G:
-				if farm != null:
-					hud.toast("作物：" + farm.cycle_crop(1))
-			KEY_M:
-				AudioServer.set_bus_mute(0, not AudioServer.is_bus_mute(0))
-				hud.toast("音效已" + ("静音" if AudioServer.is_bus_mute(0) else "开启"))
-			KEY_T:
-				dn.toggle_speed()
-			KEY_H:
-				hud.help_label.visible = not hud.help_label.visible
-			KEY_ESCAPE:
-				build_mode = false
-				_refresh_preview()
+			KEY_E: _do_action("harvest")
+			KEY_B: _do_action("build")
+			KEY_1, KEY_2, KEY_3, KEY_4: _do_action("pick%d" % (event.keycode - KEY_1 + 1))
+			KEY_R: _do_action("rotate")
+			KEY_F: _do_action("farm")
+			KEY_F2: _do_action("save")
+			KEY_F3: _do_action("load")
+			KEY_G: _do_action("crop")
+			KEY_M: _do_action("mute")
+			KEY_T: _do_action("time")
+			KEY_H: _do_action("help")
+			KEY_ESCAPE: _do_action("esc")
 
 	if event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_LEFT and build_mode:
+		# 触控时触摸会被模拟成鼠标左键，放置交给专门的按钮，避免误触
+		if event.button_index == MOUSE_BUTTON_LEFT and build_mode and not GameBus.touch_enabled:
 			_try_place_at_mouse()
+
+
+## 所有游戏动作的唯一入口：键盘与触控按钮共用
+func _do_action(a: String) -> void:
+	match a:
+		"harvest":
+			_harvest()
+		"build":
+			build_mode = not build_mode
+			_refresh_preview()
+		"rotate":
+			if build_mode:
+				preview_rot += PI * 0.25
+		"place":
+			_try_place_at_mouse()
+		"farm":
+			if farm != null:
+				farm.interact(player.global_position)
+		"save":
+			if save_sys != null:
+				save_sys.save(1)
+		"load":
+			if save_sys != null:
+				save_sys.load(1)
+		"crop":
+			if farm != null:
+				hud.toast("作物：" + farm.cycle_crop(1))
+		"mute":
+			AudioServer.set_bus_mute(0, not AudioServer.is_bus_mute(0))
+			hud.toast("音效已" + ("静音" if AudioServer.is_bus_mute(0) else "开启"))
+		"time":
+			dn.toggle_speed()
+		"help":
+			if hud != null:
+				var on := not hud.help_label.visible
+				hud.show_help_panel(on)
+		"esc":
+			build_mode = false
+			_refresh_preview()
+		"jump":
+			GameBus.touch_jump_edge = true
+		_:
+			if a.begins_with("pick"):
+				var i := int(a.substr(4)) - 1
+				if i >= 0 and i < BUILD_ITEMS.size():
+					build_index = i
+					build_mode = true
+					_refresh_preview()
 
 
 # ——————————————— 采集 ———————————————
@@ -583,22 +654,23 @@ func _process(dt: float) -> void:
 		var n := _nearest_resource()
 		if n != null:
 			var kind: String = n.get_meta("resource", "wood")
-			hud.set_prompt("[E] 采集 %s  ×%d" % [hud.RES_NAME[kind], int(n.get_meta("amount", 1))])
+			hud.set_prompt(_hint("[E] 采集 %s  ×%d", "采集 %s  ×%d") % [hud.RES_NAME[kind], int(n.get_meta("amount", 1))])
 		else:
 			hud.set_prompt("")
 		if farm != null:
 			var fp := farm.prompt_text(player.global_position)
 			if fp != "":
-				hud.set_prompt(fp + "　[G] 切换作物：" + farm.selected_crop_name())
+				hud.set_prompt(fp + _hint("　[G] 切换作物：", "　切换作物：") + farm.selected_crop_name())
 	else:
 		var item: Dictionary = BUILD_ITEMS[build_index]
 		var cost_txt := ""
 		for k in item.cost:
 			cost_txt += "%s%d " % [hud.RES_NAME[k], int(item.cost[k])]
-		hud.set_prompt("建造模式：左键放置 %s（%s）  [R]旋转  [Esc]退出" % [item.name, cost_txt])
+		hud.set_prompt(_hint("建造模式：左键放置 %s（%s）  [R]旋转  [Esc]退出",
+			"建造模式：点「放置」确认 %s（%s）「旋转」转向") % [item.name, cost_txt])
 
 	if build_mode and preview != null:
-		var g := _pick_ground(get_viewport().get_mouse_position())
+		var g := _preview_in_front() if GameBus.touch_enabled else _pick_ground(get_viewport().get_mouse_position())
 		if g != Vector3.ZERO:
 			preview.global_position = g
 			preview.rotation.y = preview_rot
@@ -644,8 +716,8 @@ func _on_auto_save(_day: int, _season: int) -> void:
 
 func _build_menu_text() -> String:
 	if not build_mode:
-		return "[B] 建造模式"
-	var s := "建造（1-4 选择）\n"
+		return _hint("[B] 建造模式", "建造模式")
+	var s := _hint("建造（1-4 选择）\n", "建造（点下方按钮选择）\n")
 	for i in BUILD_ITEMS.size():
 		var it: Dictionary = BUILD_ITEMS[i]
 		var cost := ""

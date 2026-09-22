@@ -8,6 +8,7 @@ var season_label: Label
 var prompt_label: Label
 var build_label: Label
 var help_label: Label
+var help_panel: Panel
 var toast_label: Label
 var toast_t := 0.0
 
@@ -72,7 +73,8 @@ func _build() -> void:
 	add_child(build_label)
 
 	# 帮助
-	add_child(_panel(Vector2(18, 640), Vector2(560, 150), 0.45))
+	help_panel = _panel(Vector2(18, 640), Vector2(560, 150), 0.45)
+	add_child(help_panel)
 	help_label = _label(16, Vector2(34, 650), 540)
 	help_label.size = Vector2(540, 140)
 	help_label.text = "WASD/方向键 移动 · Shift 奔跑 · 空格 跳跃\n鼠标右键拖拽 转视角 · 滚轮 缩放\nE 采集 · B 建造模式 · 1-4 选建筑 · 左键放置\nF 农事 · G 换作物 · T 加速时间 · H 隐藏帮助\nF2 保存 · F3 读取 · M 静音"
@@ -83,6 +85,29 @@ func _build() -> void:
 	toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	toast_label.modulate = Color(1, 1, 1, 0)
 	add_child(toast_label)
+
+
+## 触控模式重排：左下让给摇杆、右侧让给按钮列、说明改写成触控说法
+## W/H 为当前视口尺寸，k 为触控层缩放系数（由 TouchControls 发出）
+func set_touch_mode(w: float, h: float, k: float) -> void:
+	help_label.text = (
+		"左手摇杆贴左下角，向外推满自动奔跑\n"
+		+ "屏幕空白处拖动转视角，双指捏合缩放\n"
+		+ "右下大钮：采集 / 农事 / 跳\n"
+		+ "右侧：放建筑 · 建造开关 · 旋转\n"
+		+ "顶部：存 / 读 / 作物 / 加速 / 静音 / 帮助"
+	)
+	show_help_panel(false)
+	prompt_label.position = Vector2(w * 0.5 - 280.0 * k, h - 175.0 * k)
+	prompt_label.size = Vector2(560.0 * k, 56.0 * k)
+	build_label.position = Vector2(18.0 * k, 142.0 * k)
+	build_label.size = Vector2(330.0 * k, 140.0 * k)
+	build_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+
+
+func show_help_panel(on: bool) -> void:
+	help_panel.visible = on
+	help_label.visible = on
 
 
 func set_resources(res: Dictionary) -> void:
