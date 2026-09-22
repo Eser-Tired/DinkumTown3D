@@ -10,6 +10,7 @@ var build_label: Label
 var help_label: Label
 var help_panel: Panel
 var toast_label: Label
+var weapon_label: Label
 var toast_t := 0.0
 
 const RES_NAME := {
@@ -62,6 +63,13 @@ func _build() -> void:
 	season_label.text = "—"
 	add_child(season_label)
 
+	# 当前武器（右下角，与时钟面板对齐成一列）
+	add_child(_panel(Vector2(1150, 128), Vector2(226, 40), 0.42))
+	weapon_label = _label(17, Vector2(1166, 134), 210)
+	weapon_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	weapon_label.text = "—"
+	add_child(weapon_label)
+
 	# 交互提示（屏幕中下）
 	prompt_label = _label(22, Vector2(390, 690), 660)
 	prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -77,7 +85,7 @@ func _build() -> void:
 	add_child(help_panel)
 	help_label = _label(16, Vector2(34, 650), 540)
 	help_label.size = Vector2(540, 140)
-	help_label.text = "WASD/方向键 移动 · Shift 奔跑 · 空格 跳跃\n鼠标右键拖拽 转视角 · 滚轮 缩放\nE 采集 · B 建造模式 · 1-4 选建筑 · 左键放置\nF 农事 · G 换作物 · T 加速时间 · H 隐藏帮助\nF2 保存 · F3 读取 · M 静音"
+	help_label.text = "WASD/方向键 移动 · Shift 奔跑 · 空格 跳跃\n鼠标右键拖拽 转视角 · 滚轮 缩放\nE 采集 · 左键 攻击 · Q 换武器\nB 建造模式 · 1-4 选建筑 · 左键放置\nF 农事 · G 换作物 · T 加速时间 · H 隐藏帮助\nF2 保存 · F3 读取 · M 静音"
 	add_child(help_label)
 
 	# 浮动提示
@@ -124,6 +132,11 @@ func set_clock(day: int, clock: String, speed: float) -> void:
 func set_season(text: String) -> void:
 	if season_label != null:
 		season_label.text = text
+
+
+func set_weapon(text: String) -> void:
+	if weapon_label != null:
+		weapon_label.text = text
 
 
 func set_prompt(text: String) -> void:

@@ -1,5 +1,5 @@
-extends Critter
-## 鸸鹋：澳洲国鸟，长脖子大步走
+extends Huntable
+## 鸸鹋：澳洲国鸟，长脖子大步走。可狩猎，掉肉 + 羽毛（记作纤维）。
 
 
 func _mi(mesh: Mesh, m: Material, pos := Vector3.ZERO, rot := Vector3.ZERO, scl := Vector3.ONE) -> MeshInstance3D:
@@ -71,5 +71,11 @@ func _build_model() -> Node3D:
 		root.add_child(_mi(shin, leg_m, Vector3(s * 0.22, 0.32, 0.02)))
 
 		root.add_child(_mi(BoxMesh.new(), leg_m, Vector3(s * 0.22, 0.04, 0.12), Vector3.ZERO, Vector3(0.13, 0.08, 0.30)))
+
+	# —— 战斗属性：比袋鼠脆（22 血），但掉更多羽毛 ——
+	_configure(22, {
+		"food": [2, 3],      # 鸸鹋肉（澳洲确实是红肉）
+		"fiber": [1, 3],     # 羽毛归入纤维
+	}, 1.05)
 
 	return root

@@ -23,6 +23,13 @@ var cam_pitch: Node3D
 var cam: Camera3D
 var model: Node3D
 
+# —— 战斗（近战）——
+const WeaponsS := preload("res://scripts/weapons.gd")
+var weapon_idx := 0                # 当前武器在 WeaponsS.LIST 中的下标
+var attack_cd := 0.0               # 剩余冷却
+var swing_t := -1.0                # 挥砍动画进度（<0 表示未在挥）
+var swing_dur := 0.30
+
 
 func _ready() -> void:
 	model = Node3D.new()
@@ -237,3 +244,89 @@ func _process(dt: float) -> void:
 		if arm_l:
 			arm_l.rotation.x = -1.1
 			ab.rotation.x = -1.1
+
+	# —— 战斗冷却与挥砍动画 ——
+	_update_combat(dt)
+
+
+# ——————————————— 战斗 ———————————————
+## 返回当前武器数据（空字典表示无武器）
+func weapon() -> Dictionary:
+	return WeaponsS.get_at(weapon_idx)
+
+
+func weapon_name() -> String:
+	return WeaponsS.name_of(str(weapon().get("id", "")))
+
+
+## 切到下一把武器，返回新武器名
+func cycle_weapon(dir := 1) -> String:
+	weapon_idx = WeaponsS.cycle(weapon_idx, dir)
+	GameBus.tool_changed.emit(weapon_name())
+	# 换武器时立刻打断挥砍，避免动画串味
+	swing_t = -1.0
+	return weapon_name()
+
+
+## 能否出手（冷却好了）
+func can_attack() -> bool:
+	return attack_cd <= 0.0
+
+
+## 发起一次挥砍。返回本次使用的武器数据（冷却未好时返回空字典）。
+func start_attack() -> Dictionary:
+	if attack_cd > 0.0:
+		return {}
+	var w := weapon()
+	if w.is_empty():
+		return {}
+	attack_cd = float(w.get("cd", 0.5))
+	swing_t = 0.0
+	GameBus.tool_used.emit(weapon_name(), global_position)
+	return w
+
+
+## 玩家朝向的水平前方单位向量（模型朝向，不是相机朝向）
+func facing() -> Vector3:
+	var y := model.rotation.y if model != null else yaw
+	return Vector3(sin(y), 0.0, cos(y))
+
+
+func _update_combat(dt: float) -> void:
+	if attack_cd > 0.0:
+		attack_cd = maxf(0.0, attack_cd - dt)
+
+	if swing_t < 0.0:
+		return
+
+	swing_t += dt
+	var k := swing_t / swing_dur
+	if k >= 1.0:
+		swing_t = -1.0
+		# 收势：只复位持械的手臂
+		_reset_weapon_arms()
+		return
+
+	# 挥砍曲线：前 35% 快速下劈，之后缓慢回位
+	var s := 0.0
+	if k < 0.35:
+		s = k / 0.35
+	else:
+		s = 1.0 - (k - 0.35) / 0.65
+	# 用力曲线：让中段更快、两端更黏
+	s = smoothstep(0.0, 1.0, s)
+
+	var arm_r := model.get_node_or_null("ArmR")
+	if arm_r != null:
+		# 从抬起（-1.9）劈到身前（0.5）
+		arm_r.rotation.x = lerpf(-1.9, 0.5, s)
+	var arm_l := model.get_node_or_null("ArmL")
+	if arm_l != null:
+		arm_l.rotation.x = lerpf(-0.5, 0.25, s)
+
+
+func _reset_weapon_arms() -> void:
+	for nm in ["ArmL", "ArmR"]:
+		var a := model.get_node_or_null(nm)
+		if a != null:
+			a.rotation.x = 0.0

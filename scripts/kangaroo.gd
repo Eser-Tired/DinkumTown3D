@@ -1,5 +1,5 @@
-extends Critter
-## 袋鼠：澳洲内陆主角。大后腿、粗尾、跳跃移动
+extends Huntable
+## 袋鼠：澳洲内陆主角。大后腿、粗尾、跳跃移动。可狩猎，掉肉 + 少量纤维。
 
 
 func _mi(mesh: Mesh, m: Material, pos := Vector3.ZERO, rot := Vector3.ZERO, scl := Vector3.ONE) -> MeshInstance3D:
@@ -118,5 +118,12 @@ func _build_model() -> Node3D:
 		ear.size = Vector3(0.08, 0.32, 0.14)
 		head.add_child(_mi(ear, fur_dark, Vector3(s * 0.11, 0.26, -0.04), Vector3(-0.18, 0, s * 0.30)))
 	root.add_child(head)
+
+	# —— 战斗属性：血量 / 掉落 / 命中盒 ——
+	# 血量 30：斧头 2 刀、长矛 3 刀，制造"换武器有意义"的差异
+	_configure(30, {
+		"food": [2, 4],      # 袋鼠肉
+		"fiber": [0, 2],     # 尾巴上的粗毛，低概率
+	}, 1.0)
 
 	return root

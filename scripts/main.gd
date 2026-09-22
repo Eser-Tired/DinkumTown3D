@@ -14,6 +14,7 @@ const SeasonS := preload("res://scripts/season.gd")
 const FarmS := preload("res://scripts/farm.gd")
 const SaveS := preload("res://scripts/save_system.gd")
 const TouchS := preload("res://scripts/touch_controls.gd")
+const WeaponsS := preload("res://scripts/weapons.gd")
 
 const TOWN := Vector2(-14.0, -10.0)
 const LAKE := Vector2(48.0, 22.0)
@@ -58,6 +59,9 @@ var built_items: Array = []      # {kind, x, z, rot}
 var step_dist := 0.0
 var last_pos := Vector3.ZERO
 var rain_particles: GPUParticles3D = null
+
+## 可狩猎动物列表（重新生成时会整体清空重填）
+var critters: Array = []
 
 
 func _ready() -> void:
@@ -418,6 +422,7 @@ func _spawn_critters() -> void:
 		var k: Node3D = KangarooS.new()
 		add_child(k)
 		k.setup(terrain, p, player)
+		_register_critter(k)
 
 	for i in 4:
 		var p := _random_spot(48.0, 40.0, 4.0)
@@ -426,6 +431,68 @@ func _spawn_critters() -> void:
 		var e: Node3D = EmuS.new()
 		add_child(e)
 		e.setup(terrain, p, player)
+		_register_critter(e)
+
+
+## 把一只可狩猎动物纳入管理：接死亡信号，登记碰撞体（玩家不能穿过去）
+func _register_critter(c: Node3D) -> void:
+	if not (c is Huntable):
+		return
+	critters.append(c)
+	var h := c as Huntable
+	h.died.connect(_on_critter_died)
+	# 动物也参与玩家的圆形避让，否则会直接穿过袋鼠
+	colliders.append({
+		"node": c,
+		"pos": Vector2(c.global_position.x, c.global_position.z),
+		"r": h.hit_radius * 0.55,
+	})
+
+
+func _on_critter_died(drop: Dictionary, pos: Vector3) -> void:
+	var h := _find_critter_at(pos)
+	if h == null:
+		_diag("died 回调找不到对应动物 pos=%s critters=%d" % [str(pos), critters.size()])
+		return
+	var got := h.roll_drops()
+	var txt := ""
+	for d in got:
+		var kind: String = d.kind
+		var amt: int = d.amount
+		inv[kind] = int(inv.get(kind, 0)) + amt
+		txt += "+%d %s  " % [amt, hud.RES_NAME.get(kind, kind)]
+		GameBus.res_harvested.emit(kind, amt, pos)
+	_diag("died 结算 got=%s inv_food=%d" % [str(got), int(inv.get("food", 0))])
+	if txt != "":
+		hud.toast(txt.strip_edges())
+		hud.set_resources(inv)
+
+
+## 轻量诊断：只在带 --combat-diag 时把内容追加到 res://combat_diag.log
+func _diag(msg: String) -> void:
+	if not OS.get_cmdline_args().has("--combat-diag"):
+		return
+	var path := "res://combat_diag.log"
+	# 用 READ_WRITE 打开后在末尾写；文件不存在时退回 WRITE 新建
+	var f: FileAccess = null
+	if FileAccess.file_exists(path):
+		f = FileAccess.open(path, FileAccess.READ_WRITE)
+		if f != null:
+			f.seek_end()
+	else:
+		f = FileAccess.open(path, FileAccess.WRITE)
+	if f != null:
+		f.store_line(msg)
+		f.close()
+
+
+func _find_critter_at(pos: Vector3) -> Huntable:
+	for c in critters:
+		if not is_instance_valid(c):
+			continue
+		if (c as Huntable).global_position.distance_to(pos) < 0.01:
+			return c as Huntable
+	return null
 
 
 # ——————————————— 输入 ———————————————
@@ -437,6 +504,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_1, KEY_2, KEY_3, KEY_4: _do_action("pick%d" % (event.keycode - KEY_1 + 1))
 			KEY_R: _do_action("rotate")
 			KEY_F: _do_action("farm")
+			KEY_Q: _do_action("swap_weapon")
 			KEY_F2: _do_action("save")
 			KEY_F3: _do_action("load")
 			KEY_G: _do_action("crop")
@@ -446,9 +514,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_ESCAPE: _do_action("esc")
 
 	if event is InputEventMouseButton and event.pressed:
-		# 触控时触摸会被模拟成鼠标左键，放置交给专门的按钮，避免误触
-		if event.button_index == MOUSE_BUTTON_LEFT and build_mode and not GameBus.touch_enabled:
-			_try_place_at_mouse()
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			if build_mode and not GameBus.touch_enabled:
+				# 建造模式：左键落下建筑
+				_try_place_at_mouse()
+			elif not build_mode and not GameBus.touch_enabled:
+				# 探索模式：左键挥砍
+				_attack()
 
 
 ## 所有游戏动作的唯一入口：键盘与触控按钮共用
@@ -467,6 +539,11 @@ func _do_action(a: String) -> void:
 		"farm":
 			if farm != null:
 				farm.interact(player.global_position)
+		"attack":
+			_attack()
+		"swap_weapon":
+			hud.toast("武器：" + player.cycle_weapon(1))
+			hud.set_resources(inv)
 		"save":
 			if save_sys != null:
 				save_sys.save(1)
@@ -499,6 +576,73 @@ func _do_action(a: String) -> void:
 					build_index = i
 					build_mode = true
 					_refresh_preview()
+
+
+# ——————————————— 战斗 ———————————————
+## 挥砍一次：判定前方扇形内最近的一只可狩猎动物
+func _attack() -> void:
+	var w: Dictionary = player.start_attack()
+	if w.is_empty():
+		return                       # 冷却未好 / 无武器
+
+	var origin := player.global_position
+	var face: Vector3 = player.facing()
+	var reach: float = float(w.get("reach", 2.6))
+	var arc: float = float(w.get("arc", 0.6))
+	var dmg: int = int(w.get("dmg", 10))
+
+	var best: Huntable = null
+	var best_d := reach
+	for c in critters:
+		if not is_instance_valid(c):
+			continue
+		var h := c as Huntable
+		if h == null or h.is_dead():
+			continue
+		var to := h.global_position - origin
+		to.y = 0.0
+		var d := to.length()
+		# 命中盒：动物半径算进去，大动物更容易被打到
+		if d > reach + h.hit_radius:
+			continue
+		if d > 0.01:
+			var cos_a := face.dot(to.normalized())
+			if cos_a < cos(arc):
+				continue
+		if d < best_d:
+			best_d = d
+			best = h
+
+	if best == null:
+		return
+
+	var res: Dictionary = best.take_hit(dmg, origin)
+	if bool(res.get("dead", false)):
+		hud.toast("猎获！")
+	else:
+		hud.toast("命中 -%d" % dmg)
+
+
+## 返回附近可攻击动物的中文名（无则空串）。用于准星附近的交互提示。
+func _nearest_critter() -> String:
+	var pp := player.global_position
+	var w: Dictionary = player.weapon()
+	var reach: float = float(w.get("reach", 2.6))
+	var best := ""
+	var bd: float = reach + 1.4
+	for c in critters:
+		if not is_instance_valid(c):
+			continue
+		var h := c as Huntable
+		if h == null or h.is_dead():
+			continue
+		var d := Vector2(h.global_position.x - pp.x, h.global_position.z - pp.z).length()
+		if d < bd:
+			bd = d
+			# 用脚本资源判断种类：kangaroo.gd / emu.gd 都没有 class_name，不能用 is
+			var sp: String = h.get_script().resource_path if h.get_script() != null else ""
+			best = "袋鼠" if sp.ends_with("kangaroo.gd") else "鸸鹋"
+	return best
 
 
 # ——————————————— 采集 ———————————————
@@ -674,9 +818,12 @@ func _process(dt: float) -> void:
 
 	if not build_mode:
 		var n := _nearest_resource()
+		var beast := _nearest_critter()
 		if n != null:
 			var kind: String = n.get_meta("resource", "wood")
 			hud.set_prompt(_hint("[E] 采集 %s  ×%d", "采集 %s  ×%d") % [hud.RES_NAME[kind], int(n.get_meta("amount", 1))])
+		elif beast != null:
+			hud.set_prompt(_hint("[左键] 攻击 %s　[Q] 换武器", "点击攻击 %s　换武器") % beast)
 		else:
 			hud.set_prompt("")
 		if farm != null:
@@ -715,6 +862,7 @@ func _process(dt: float) -> void:
 		hud_timer = 0.2
 		hud.set_clock(dn.day_count, dn.clock_string(), dn.speed_scale)
 		hud.set_build(_build_menu_text())
+		hud.set_weapon("武器：" + player.weapon_name() + _hint("（Q 切换）", ""))
 		if season != null:
 			hud.set_season("%s · 第 %d 天 · %s" % [season.season_name, dn.day_count, _weather_cn(season.weather)])
 
@@ -780,7 +928,49 @@ func serialize() -> Dictionary:
 		"pitch": player.pitch,
 		"harvested": harvested_ids.duplicate(),
 		"built": built_items.duplicate(),
+		"weapon": player.weapon_idx,
+		# 动物状态：只存"血量 + 是否已死"，位置不存——动物一直在动，存了也没意义，
+		# 读档后从 home 重新游走即可。索引与 _spawn_critters 的生成顺序一一对应。
+		"critters": _serialize_critters(),
 	}
+
+
+func _serialize_critters() -> Array:
+	var out: Array = []
+	for c in critters:
+		if not is_instance_valid(c):
+			out.append([0, false])
+			continue
+		var h := c as Huntable
+		if h == null:
+			out.append([0, false])
+			continue
+		out.append([h.hp, h.dead])
+	return out
+
+
+func _deserialize_critters(arr: Variant) -> void:
+	if not (arr is Array):
+		return
+	var a: Array = arr
+	for i in range(mini(a.size(), critters.size())):
+		var c: Node3D = critters[i]
+		if not is_instance_valid(c):
+			continue
+		var h := c as Huntable
+		if h == null:
+			continue
+		var pair: Variant = a[i]
+		if not (pair is Array) or (pair as Array).size() < 2:
+			continue
+		var pa: Array = pair
+		if bool(pa[1]):
+			# 存档时已死：直接置死，不播动画（respawn_delay 到点会自己重生）
+			h.dead = true
+			h.hp = 0
+		else:
+			h.dead = false
+			h.hp = clampi(int(pa[0]), 1, h.max_hp)
 
 
 func deserialize(d: Dictionary) -> void:
@@ -834,6 +1024,17 @@ func deserialize(d: Dictionary) -> void:
 	dn.collect_night_lights(self)
 	if season != null:
 		_on_weather(str(season.weather))
+
+	# 武器与动物状态
+	player.weapon_idx = clampi(int(d.get("weapon", 0)), 0, WeaponsS.count() - 1)
+	_deserialize_critters(d.get("critters", []))
+	# 死亡时模型是侧翻的，读档直接置死的那些要补上倒地姿态
+	for c in critters:
+		if is_instance_valid(c):
+			var h := c as Huntable
+			if h != null and h.dead and h.model != null:
+				h.model.rotation.z = 1.35
+				h.model.position.y = -0.15
 
 
 # ——————————————— 自动截图（--auto-shot） ———————————————
