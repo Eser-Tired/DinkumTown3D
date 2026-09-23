@@ -125,9 +125,20 @@ func _build() -> void:
 ## 【关键约束】桌面的"右侧竖列"是按 1440 宽写死的像素坐标（x=1150），
 ## 在别的分辨率下会跑到屏幕外或者压住触控按钮。所以这里必须把整列
 ## 按 k 重新贴到右上角，并且只占顶部这一条，把 y > 200k 全让出来。
+## 量一段文字在某字号下的实际像素宽度。
+## 【为什么要显式量】面板宽度如果只按常量算，换字体/换文案就会溢出；
+## 实测宽度才是唯一可靠依据。没字体时返回一个保守估计，保证自检不崩。
+func _text_width(s: String, fs: int) -> float:
+	var f: Font = ThemeDB.fallback_font
+	if f == null:
+		return float(s.length()) * float(fs) * 1.05
+	return f.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+
+
 ## k      —— 几何缩放（面板尺寸、坐标），跟随触控层保持一致
 ## k_text —— 文字缩放，主调方会给一个不低于 k 的下界，防止竖屏下字小到读不了
-func set_touch_mode(w: float, h: float, k: float, k_text: float = -1.0) -> void:
+## 返回值 —— 右侧竖列（时钟/季节/武器）的真实底边 y，触控层据此排系统小钮
+func set_touch_mode(w: float, h: float, k: float, k_text: float = -1.0) -> float:
 	if k_text < 0.0:
 		k_text = k
 	help_label.text = (
@@ -153,14 +164,18 @@ func set_touch_mode(w: float, h: float, k: float, k_text: float = -1.0) -> void:
 	# 【kt = 文字缩放，k = 几何缩放】几何可以缩得很小（留出操作空间），
 	# 但文字小于 ~14px 就没法读了。所以面板尺寸/坐标用 kt，字号用 kt ≥ k。
 	var kt := k_text
-	# 【为什么宽度用 k 而不是 kt】右侧竖列的上方是触控层从 210k 起的两排系统小钮。
-	# 竖屏下 kt（短边/810 = 1.33）远大于 k（0.75），用 kt 算宽度会让面板变胖、
-	# 面板高度跟着 kt 走，整列下探到 210k 以下把系统小钮压住。
-	# 宽度保持 k 锚定右边缘不会漂；只有字号用 kt，所以窄面板里字会更宽——
-	# 但竖屏下文字是短的（"第1天 07:31"），实测放得下。
-	var pw := PANEL_W * k
-	var px := w - PAD_X * k - pw
+	# 【宽度为什么要跟 k 走】右侧竖列上方是触控层从 248k 起的系统小钮。
+	# 竖屏下 kt（短边/810 = 1.33）远大于 k（0.75），宽度跟 kt 会让面板变胖、
+	# 整列下探把系统小钮压住。所以宽度用 k 锚定右边缘，避免漂移。
+	# 但字号用 kt 后文字会变宽（横屏实测「武器：斧头」超出 226k 面板约 12%），
+	# 所以再按最长文字实测兜一个下限，保证不溢出不越屏。
 	var sizes := [62.0, 40.0, 40.0]
+	var pw := PANEL_W * k
+	for s in ["第 88 天  88:88", "秋 · 第 88 天 · 雷雨", "武器：长矛"]:
+		var need := _text_width(s, maxi(13, int((20 if s.begins_with("第") else 17) * kt))) + 28.0 * k
+		pw = maxf(pw, need)
+	pw = minf(pw, w * 0.5)
+	var px := w - PAD_X * k - pw
 	var labs := [clock_label, season_label, weapon_label]
 	var cy := PAD_TOP * kt
 	for i in _right_panels.size():
@@ -172,7 +187,10 @@ func set_touch_mode(w: float, h: float, k: float, k_text: float = -1.0) -> void:
 		var l: Label = labs[i]
 		l.position = Vector2(px + 12.0 * k, cy + 6.0 * k)
 		l.size = Vector2(pw - 24.0 * k, ph - 10.0 * k)
-		l.add_theme_font_size_override("font_size", maxi(13, int((20 if i == 0 else 17) * kt)))
+		var fs := maxi(13, int((20 if i == 0 else 17) * kt))
+		l.add_theme_font_size_override("font_size", fs)
+		l.add_theme_constant_override("outline_size", 0)
+		l.clip_text = false
 		cy += ph + GAP * k
 
 	# —— 资源栏：按 kt 缩放，贴左上。高度必须放得下 5 行 ——
@@ -201,6 +219,8 @@ func set_touch_mode(w: float, h: float, k: float, k_text: float = -1.0) -> void:
 	build_label.size = Vector2(330.0 * k, 170.0 * kt)
 	build_label.add_theme_font_size_override("font_size", maxi(12, int(18.0 * kt)))
 	build_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+
+	return cy
 
 
 func show_help_panel(on: bool) -> void:

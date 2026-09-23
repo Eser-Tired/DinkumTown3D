@@ -50,7 +50,10 @@ func _ready() -> void:
 	print("TOUCH SHOT viewport=%dx%d tc=%s" % [vs.x, vs.y, str(tc != null)])
 
 	# —— 1) 默认探索态：摇杆 + 物品栏 + 动作键 ——
-	await get_tree().create_timer(1.6).timeout
+	# 【为什么要等这么久】main 挂完 TouchControls 后要 12 帧世界才建完，
+	# 建完才 _rebuild_hotbar()，触控层才拿到格子内容。等太短会截到空物品栏，
+	# 让人误以为格子没做出来。1.6s 在 60fps 下约 96 帧，足够。
+	await get_tree().create_timer(2.4).timeout
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(dir + "touch1_explore.png")
 

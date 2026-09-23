@@ -50,11 +50,12 @@ var _btn_rects: Array = []
 var _k := 1.0
 var _vs := REF
 
-## HUD 右侧竖列（时钟/季节/武器）在"文字缩放"下的底边，单位是与 k 同一基准的系数。
-## 【为什么要跨文件同步这个数】竖屏下 HUD 用的是比 k 大的 k_text 来放大字号，
-## 竖列会随之下探；系统小钮必须让开。这个常量是 hud.set_touch_mode() 的产物，
-## 改 HUD 那边必须同步改这里，否则竖屏会被压住（有 touch_layout_check 兜底）。
-const HUD_COL_BOTTOM := 218.0
+## HUD 右侧竖列（时钟/季节/武器）的底边，随文字缩放 k_text 变化。
+## 【为什么要让 HUD 直接报数】这列的高度 = Σ(面板高) + 间距，而面板高同时受
+## 字号（kt）和实测文字宽度影响——在触控层里重算一遍必然对不上，
+## 改一次 HUD 就得同步改一次这里，早晚会撞。所以改成 hud 回调告知实际底边，
+## 触控层只负责"从它下面开始排"。拿不到时退回一个保守值。
+var _hud_col_bottom := 0.0
 var _k_text_geo := 1.0
 
 ## 快捷物品栏格子状态（由 main 通过 set_hotbar() 同步）
@@ -121,6 +122,15 @@ func set_text_scale(k_text: float) -> void:
 	_rebuild()
 
 
+## 由 main 在 hud.set_touch_mode() 之后告知右侧竖列的真实底边（像素）。
+## 系统小钮从这条线下面 30 像素起排——用实测值而不是常量，HUD 改高度这边自动跟上。
+func set_hud_column_bottom(y: float) -> void:
+	if is_equal_approx(y, _hud_col_bottom):
+		return
+	_hud_col_bottom = y
+	_rebuild()
+
+
 # ——————————————— 布局（锚点式） ———————————————
 ## 规则：尺寸与偏移一律按 k 缩放；位置由「贴哪条边」决定。
 ## 这样无论宽高比怎么变，元素只会随边缘移动，不会互相漂移。
@@ -173,13 +183,10 @@ func _rebuild() -> void:
 	_refresh_hotbar()
 
 	# —— 右上：系统小钮 ——
-	# 【跨文件约定】HUD 右侧竖列（时钟/季节/武器）在触控模式下占到 y ≈ 218k，
-	# 所以这里从 SYS_ROW1 = 248k 起，绝不上探。改这边要同步看 hud.set_touch_mode()。
-	# 竖屏（1080x2340）实测 HUD 竖列底边 = 218.4px，248k=186 太挤，
-	# 所以再叠一个"至少让过 HUD 实际底边"的兜底：按下发的 k_text 反推。
-	# 两行：248k / 306k，下排底边 306k+26k = 332k；
-	# 「旋转」放 388k，与系统钮留出 30k 以上间隙。
-	var sys_y1 := maxf(248.0 * k, HUD_COL_BOTTOM * _k_text_geo)
+	# 【为什么不用常量】HUD 右侧竖列的高度受字号和实测文字宽度双重影响，
+	# 在那边算死了这边重算必然对不上。改为读 hud 报来的真实底边，
+	# 拿不到时退回 248k（桌面/未挂 HUD 的测试场景）。
+	var sys_y1 := maxf(248.0 * k, _hud_col_bottom + 30.0)
 	var sys_y2 := sys_y1 + 58.0 * k
 	var SYS_ROW1 := sys_y1 / k
 	var SYS_ROW2 := sys_y2 / k

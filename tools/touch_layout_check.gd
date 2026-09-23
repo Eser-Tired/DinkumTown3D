@@ -23,8 +23,8 @@ func _ready() -> void:
 	# 与 main._on_touch_layout 保持同一套算法，否则自检用的是和线上不同的布局
 	GameBus.touch_layout_changed.connect(func(w: float, h: float, k: float):
 		var k_text := maxf(k, clampf(minf(w, h) / 810.0, 0.0, 1.0))
-		tc.set_text_scale(k_text)
-		hud.set_touch_mode(w, h, k, k_text))
+		var bottom: float = hud.set_touch_mode(w, h, k, k_text)
+		tc.set_hud_column_bottom(bottom))
 	add_child(tc)
 
 	await get_tree().process_frame

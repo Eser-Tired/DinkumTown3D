@@ -213,12 +213,15 @@ func _on_touch_layout(w: float, h: float, k: float) -> void:
 	# 触控层的下限是为「按钮不能太小」设的，不该直接传导到字号上。
 	# 这里用短边独立判断"够不够读"，只在极端窄高比下生效，宽屏下就等于 k。
 	var k_text := maxf(k, clampf(minf(w, h) / 810.0, 0.0, 1.0))
-	# 反向告知触控层：HUD 会随 k_text 变大而下探，系统小钮必须让位。
-	# 这一步必须在 hud.set_touch_mode 之前，否则这一帧的让位是拿旧值算的。
+	# 【为什么要先算 HUD 再算按钮】右侧竖列多高取决于字号和实测文字宽度，
+	# 把它复制到触控层里重算一定会漂。改成 HUD 算完把真实底边报回来，
+	# 触控层从那条线下面开始排——单向数据流，以后改 HUD 不用记得改触控层。
+	var bottom: float = hud.set_touch_mode(w, h, k, k_text)
 	var tc := get_node_or_null("TouchControls")
-	if tc != null and tc.has_method("set_text_scale"):
+	if tc != null and tc.has_method("set_hud_column_bottom"):
+		tc.set_hud_column_bottom(bottom)
+	elif tc != null and tc.has_method("set_text_scale"):
 		tc.set_text_scale(k_text)
-	hud.set_touch_mode(w, h, k, k_text)
 
 
 func _on_touch_action(a: String) -> void:
@@ -1260,8 +1263,11 @@ func _on_auto_save(_day: int, _season: int) -> void:
 
 func _build_menu_text() -> String:
 	if not build_mode:
-		return _hint("[B] 建造模式", "建造模式")
-	var s := _hint("建造（1-4 选择）\n", "建造（点下方按钮选择）\n")
+		# 【触控模式为什么留空】桌面这行是「[B] 建造模式」的操作提示，
+		# 但触控模式已经有左侧「建造」按钮，再显示一行纯文字只会盖在摇杆上
+		# （HUD 顶部区在竖屏下正好压到摇杆命中圆）。
+		return _hint("[B] 建造模式", "")
+	var s := _hint("建造（1-4 选择）\n", "建造（点按钮选择）\n")
 	for i in BUILD_ITEMS.size():
 		var it: Dictionary = BUILD_ITEMS[i]
 		var cost := ""
