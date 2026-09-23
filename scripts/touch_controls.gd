@@ -161,14 +161,17 @@ func _rebuild() -> void:
 	_joy.set_center_radius(_joy_r)
 	_joy.queue_redraw()
 
-	# —— 左侧竖排小钮：背包 / 建造 ——
+	# —— 左侧竖排小钮：菜单 / 背包 / 建造 ——
 	# 必须整块避开摇杆命中圆（_joy_r*1.2），否则测试和手感上都会被摇杆吃掉。
 	# 摇杆默认中心 y ≈ H - joy_r*1.3 - 40k，命中半径 joy_r*1.2，
 	# 所以小钮的底部要落到「摇杆中心 - 摇杆命中半径」以上。
+	# 「菜单」放在最上面：它是导航键，和下面的面板类按钮同类但更靠外，
+	# 拇指从边缘滑进来第一个碰到它，不会误开背包。
 	var sw := 84.0 * k
 	var sx := 58.0 * k
 	var jc_y := H - _joy_r * 1.3 - 40.0 * k        # 摇杆中心（默认贴边时）
 	var col_bottom := jc_y - _joy_r * 1.2 - 14.0 * k
+	_btn_at("菜单", "pause", sx, col_bottom - 156.0 * k, sw, 62.0 * k, 18)
 	_btn_at("背包", "bag", sx, col_bottom - 78.0 * k, sw, 62.0 * k, 18)
 	_btn_at("建造", "build", sx, col_bottom, sw, 62.0 * k, 18)
 

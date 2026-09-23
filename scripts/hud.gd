@@ -26,13 +26,23 @@ func touch_reserved_rects() -> Array:
 	for p in _right_panels:
 		if p != null:
 			out.append(Rect2(p.position, p.size))
-	out.append(Rect2(prompt_label.position, prompt_label.size))
-	out.append(Rect2(build_label.position, build_label.size))
+	# 隐藏的面板不算占位：建造菜单在触控模式的非建造态是空文本，
+	# 把它的矩形算进去会误报压住了左上的「菜单」按钮。
+	if prompt_label != null and prompt_label.visible:
+		out.append(Rect2(prompt_label.position, prompt_label.size))
+	if build_label != null and build_label.visible:
+		out.append(Rect2(build_label.position, build_label.size))
 	return out
 
 const RES_NAME := {
 	"wood": "木材", "stone": "石头", "fiber": "纤维", "ore": "铁矿石", "food": "食物"
 }
+
+## 触控左侧竖排按钮（菜单/背包/建造）右边缘之后再留一点间隙，k 为基准。
+## 【跨文件约定】对应 touch_controls.gd 里的 sx = 58k、sw = 84k。
+## 改那边的位置或宽度必须同步改这里，否则 HUD 的建造菜单会压住按钮
+## （tools/touch_layout_check.gd 有断言兜底）。
+const TOUCH_LEFT_COL_RIGHT := 154.0
 
 
 func _ready() -> void:
@@ -109,7 +119,7 @@ func _build() -> void:
 	add_child(help_panel)
 	help_label = _label(16, Vector2(34, 650), 540)
 	help_label.size = Vector2(540, 140)
-	help_label.text = "WASD/方向键 移动 · Shift 奔跑 · 空格 跳跃\n鼠标右键拖拽 转视角 · 滚轮 缩放\nE 采集 · 左键 攻击 · Q 换武器 · 1-4 切物品栏\nB 建造模式 · 建造中 1-4 选建筑 · 左键放置\nI 背包 · F 农事 · G 换作物 · T 加速时间 · H 隐藏帮助\nF2 保存 · F3 读取 · M 静音 · Esc 关闭当前面板"
+	help_label.text = "WASD/方向键 移动 · Shift 奔跑 · 空格 跳跃\n鼠标右键拖拽 转视角 · 滚轮 缩放\nE 采集 · 左键 攻击 · Q 换武器 · 1-4 切物品栏\nB 建造模式 · 建造中 1-4 选建筑 · 左键放置\nI 背包 · F 农事 · G 换作物 · T 加速时间 · H 隐藏帮助\nF2 保存 · F3 读取 · M 静音 · Esc 暂停菜单"
 	add_child(help_label)
 
 	# 浮动提示
@@ -119,12 +129,6 @@ func _build() -> void:
 	add_child(toast_label)
 
 
-## 触控模式重排：左下让给摇杆、右侧让给按钮列、说明改写成触控说法
-## W/H 为当前视口尺寸，k 为触控层缩放系数（由 TouchControls 发出）
-##
-## 【关键约束】桌面的"右侧竖列"是按 1440 宽写死的像素坐标（x=1150），
-## 在别的分辨率下会跑到屏幕外或者压住触控按钮。所以这里必须把整列
-## 按 k 重新贴到右上角，并且只占顶部这一条，把 y > 200k 全让出来。
 ## 量一段文字在某字号下的实际像素宽度。
 ## 【为什么要显式量】面板宽度如果只按常量算，换字体/换文案就会溢出；
 ## 实测宽度才是唯一可靠依据。没字体时返回一个保守估计，保证自检不崩。
@@ -135,6 +139,13 @@ func _text_width(s: String, fs: int) -> float:
 	return f.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 
 
+## 触控模式重排：左下让给摇杆、右侧让给按钮列、说明改写成触控说法
+## W/H 为当前视口尺寸，k 为触控层缩放系数（由 TouchControls 发出）
+##
+## 【关键约束】桌面的"右侧竖列"是按 1440 宽写死的像素坐标（x=1150），
+## 在别的分辨率下会跑到屏幕外或者压住触控按钮。所以这里必须把整列
+## 按 k 重新贴到右上角，并且只占顶部这一条，把 y > 200k 全让出来。
+##
 ## k      —— 几何缩放（面板尺寸、坐标），跟随触控层保持一致
 ## k_text —— 文字缩放，主调方会给一个不低于 k 的下界，防止竖屏下字小到读不了
 ## 返回值 —— 右侧竖列（时钟/季节/武器）的真实底边 y，触控层据此排系统小钮
@@ -147,8 +158,9 @@ func set_touch_mode(w: float, h: float, k: float, k_text: float = -1.0) -> float
 		+ "点击画面：采集附近的资源 / 攻击动物\n"
 		+ "底栏 4 格：点一下切换武器或建筑\n"
 		+ "右侧：使用（攻击/放置）· 跳 · 农事 · 旋转\n"
-		+ "左上：背包 · 建造　　右上：存 / 读 / 加速 / 静音"
-		+ "\n背包里可点武器直接装备，再点背包键或 Esc 关闭"
+		+ "左上：菜单 · 背包 · 建造　　右上：存 / 读 / 加速 / 静音"
+		+ "\n背包里可点武器直接装备，再点背包键或 Esc 关闭\n"
+		+ "系统返回键 / 左上「菜单」唤出暂停菜单（会停下时间与天气）"
 	)
 	show_help_panel(false)
 
@@ -212,10 +224,13 @@ func set_touch_mode(w: float, h: float, k: float, k_text: float = -1.0) -> float
 	prompt_label.size = Vector2(560.0 * k, 56.0 * kt)
 	prompt_label.add_theme_font_size_override("font_size", maxi(13, int(20.0 * kt)))
 	var by := 16.0 * kt + rh + 12.0 * k
-	# 【为什么这里要 330k 而不是 330kt】菜单从左上角起，向右展开；
-	# 竖屏下 kt=1.33 会把宽度撑到 440，直接钻进右上系统小钮的地盘。
-	# 用 k 算宽度（竖屏 810 宽 -> 247px）刚好卡在小钮左侧。
-	build_label.position = Vector2(18.0 * kt, by)
+	# 【为什么 x 不从 18k 起】左上角那一列现在是触控按钮的地盘：
+	# touch_controls.gd 的左侧竖排（菜单/背包/建造）占 x ∈ [58k, 142k]。
+	# 建造菜单贴着 18k 起会正好压在「菜单」按钮上，所以让它从竖排右侧开始。
+	# 154k = 58k(左距) + 84k(钮宽) + 12k(间隙)，改那边的 sx/sw 要同步改这里。
+	# 【为什么宽度用 330k 而不是 330kt】竖屏下 kt=1.33 会把宽度撑到 440，
+	# 直接钻进右上系统小钮的地盘；用 k 算（竖屏 810 宽 -> 330*0.6=198）刚好够。
+	build_label.position = Vector2(TOUCH_LEFT_COL_RIGHT * k, by)
 	build_label.size = Vector2(330.0 * k, 170.0 * kt)
 	build_label.add_theme_font_size_override("font_size", maxi(12, int(18.0 * kt)))
 	build_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
@@ -251,10 +266,13 @@ func set_weapon(text: String) -> void:
 
 func set_prompt(text: String) -> void:
 	prompt_label.text = text
+	# 空文本不该占地方：留着一个透明矩形会挡住下面的触控按钮（有布局自检兜底）
+	prompt_label.visible = (text != "")
 
 
 func set_build(text: String) -> void:
 	build_label.text = text
+	build_label.visible = (text != "")
 
 
 func toast(text: String) -> void:

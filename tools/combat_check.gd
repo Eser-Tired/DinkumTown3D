@@ -190,6 +190,142 @@ func _run() -> void:
 	# —— 13) 背包界面 ——（触控重构收尾）
 	_check_bag()
 
+	# —— 14) 暂停菜单 ——（放最后：它会真的暂停 SceneTree，
+	# 中途残留 paused 会让后面所有 await 卡死，所以末尾强制恢复）
+	_check_pause()
+
+
+## 暂停菜单：层级 / 可点性 / 真暂停 / 逐层退出 / 退出前解除暂停
+func _check_pause() -> void:
+	if m.pause_menu == null:
+		_ok(false, "暂停菜单已创建")
+		return
+	var pm = m.pause_menu
+	_ok(true, "暂停菜单已创建")
+	_ok(not pm.is_open(), "暂停菜单初始为关闭")
+
+	# 层级必须盖住背包(30)，否则点菜单按钮时会同时触发下面的 UI
+	_ok(pm.layer > m.inv_ui.layer, "暂停菜单层级高于背包（实得 %d > %d）" % [pm.layer, m.inv_ui.layer])
+
+	# 【最关键的一条】游戏暂停后所有 INHERIT 节点的 _process/_input 全停，
+	# 菜单自己不声明 ALWAYS 就会变成一张点不动、关不掉的死图。
+	_ok(pm.process_mode == Node.PROCESS_MODE_ALWAYS, "暂停菜单 process_mode 为 ALWAYS")
+
+	# 四个菜单项
+	var want := ["继续游戏", "读取存档", "设置", "退出游戏"]
+	for t in want:
+		_ok(_pm_btn(t) != null, "菜单项存在：%s" % t)
+
+	# —— 返回键打开 ——
+	m._back_requested()
+	_ok(pm.is_open(), "返回键（Esc/系统返回）能打开暂停菜单")
+	_ok(get_tree().paused, "打开时游戏真暂停（get_tree().paused）")
+	_ok(GameBus.ui_blocking, "打开时标记 ui_blocking")
+	# 这两条才是"暂停"真正生效的证据：can_process() 直接反映引擎会不会
+	# 调这个节点的 _process/_input。只断言 paused==true 是不够的——
+	# 万一有人把 main 也设成 ALWAYS，玩家和昼夜照样在跑，而 paused 仍是 true。
+	_ok(not m.can_process(), "暂停时 main 停摆（玩家 / 昼夜 / 动物全停）")
+	_ok(pm.can_process(), "暂停时菜单自身仍可交互（否则点不动也关不掉）")
+
+	# —— 子面板切换 ——
+	var b_load := _pm_btn("读取存档")
+	if b_load != null:
+		b_load.pressed.emit()
+	_ok(pm._slots != null and pm._slots.visible, "点读取存档进入存档列表")
+	_ok(not pm._main_box.visible, "进子面板后首页隐藏")
+	_ok(pm.go_back(), "go_back 从子面板返回首页")
+	_ok(pm._main_box.visible and not pm._slots.visible, "返回后回到首页")
+
+	var b_set := _pm_btn("设置")
+	if b_set != null:
+		b_set.pressed.emit()
+	_ok(pm._settings != null and pm._settings.visible, "点设置进入设置面板")
+	# 面板必须铺满父级：用 set_anchors_preset 会留下 size=0 的坑（锚点改了、offsets
+	# 没归零），CenterContainer 于是 0 大、内容贴在中心右下角。这条断言守住它。
+	var ss: Vector2 = pm._settings.size
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	_ok(is_equal_approx(ss.x, vp.x) and is_equal_approx(ss.y, vp.y),
+		"设置面板铺满视口（实得 %s vs %s）" % [str(ss), str(vp)])
+	_ok(pm.go_back(), "go_back 从设置面板返回首页")
+
+	# —— 菜单自己接 Esc（关键：paused 时 main 的 _unhandled_input 不会跑，
+	#     菜单不自己接就会"打开得了、关不掉"）——
+	_ok(pm._main_box.visible and pm.is_open(), "上一步已回到首页")
+	pm._show_panel("settings")
+	_ok(pm._settings.visible, "进设置面板用于 Esc 分层测试")
+	_send_esc(pm)
+	_ok(pm._main_box.visible and pm.is_open(), "Esc 在子面板只回首页、不关菜单")
+	_send_esc(pm)
+	_ok(not pm.is_open(), "Esc 在首页关闭菜单并继续游戏")
+	_ok(not get_tree().paused, "Esc 关闭后解除暂停")
+
+	# —— go_back 关闭 ——
+	pm.open()
+	_ok(pm.go_back(), "go_back 在首页时关闭菜单")
+	_ok(not pm.is_open(), "菜单已关闭")
+	_ok(not get_tree().paused, "关闭后解除暂停")
+	_ok(not GameBus.ui_blocking, "关闭后解除 ui_blocking")
+
+	# —— 触控左上「菜单」按钮 ——
+	# 桌面测试场景下触控层没挂载，GameBus.touch_action 也就没人接。
+	# 这里临时接上再发一次，才能真正覆盖"按钮 → 信号 → 动作 → 菜单"整条链路；
+	# 只调 _do_action("pause") 会漏掉中间那段。
+	var linked := GameBus.touch_action.is_connected(m._on_touch_action)
+	if not linked:
+		GameBus.touch_action.connect(m._on_touch_action)
+	GameBus.touch_action.emit("pause")
+	_ok(pm.is_open(), "触控「菜单」按钮能打开菜单")
+	if not linked:
+		GameBus.touch_action.disconnect(m._on_touch_action)
+	pm.close()
+
+	# —— 分层退出：背包开着时返回键只关背包，不开菜单 ——
+	m._do_action("bag")
+	_ok(m.inv_ui.is_open(), "打开背包用于分层测试")
+	m._back_requested()
+	_ok(not m.inv_ui.is_open() and not pm.is_open(), "背包开着时返回键只关背包")
+
+	# —— 分层退出：建造模式下返回键只退建造，不开菜单 ——
+	m._set_build_mode(true)
+	m._back_requested()
+	_ok(not m.build_mode and not pm.is_open(), "建造模式下返回键只退建造")
+	m._refresh_preview()
+
+	# —— 退出游戏必须先解除暂停，否则主界面会以 paused 状态启动、整个卡死 ——
+	pm.open()
+	# 临时断开真实退出流程：它真的会切场景，测试里跑不得
+	pm.quit_requested.disconnect(m._on_pause_quit)
+	var b_quit := _pm_btn("退出游戏")
+	if b_quit != null:
+		b_quit.pressed.emit()
+	_ok(not get_tree().paused, "点退出游戏前已解除暂停")
+	_ok(not GameBus.ui_blocking, "退出游戏时解除 ui_blocking")
+	pm.quit_requested.connect(m._on_pause_quit)
+
+	# 收尾：无论上面走到哪一步，都必须把暂停解除干净
+	pm.visible = false
+	get_tree().paused = false
+	GameBus.ui_blocking = false
+	_ok(not get_tree().paused, "收尾时暂停已解除")
+
+
+## 合成一次 Esc 按键并喂给暂停菜单自己的输入处理
+func _send_esc(pm) -> void:
+	var ev := InputEventKey.new()
+	ev.keycode = KEY_ESCAPE
+	ev.physical_keycode = KEY_ESCAPE
+	ev.pressed = true
+	pm._unhandled_input(ev)
+
+
+func _pm_btn(text: String) -> Button:
+	if m.pause_menu == null or m.pause_menu._main_box == null:
+		return null
+	for c in m.pause_menu._main_box.get_children():
+		if c is Button and (c as Button).text == text:
+			return c as Button
+	return null
+
 
 ## 背包：开关、内容刷新、装备联动、输入屏蔽
 func _check_bag() -> void:

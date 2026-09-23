@@ -16,6 +16,7 @@ const SaveS := preload("res://scripts/save_system.gd")
 const TouchS := preload("res://scripts/touch_controls.gd")
 const WeaponsS := preload("res://scripts/weapons.gd")
 const InvUIS := preload("res://scripts/inventory_ui.gd")
+const PauseS := preload("res://scripts/pause_menu.gd")
 
 const TOWN := Vector2(-14.0, -10.0)
 const LAKE := Vector2(48.0, 22.0)
@@ -65,6 +66,7 @@ var save_sys: SaveSystem
 
 var inv := {"wood": 0, "stone": 0, "fiber": 0, "ore": 0, "food": 0}
 var inv_ui: InventoryUI
+var pause_menu: PauseMenu
 var build_mode := false
 var build_index := 0
 var preview: Node3D = null
@@ -150,6 +152,16 @@ func _ready() -> void:
 	save_sys.setup(self)
 	GameBus.new_day.connect(_on_auto_save)
 
+	# —— 暂停菜单（默认隐藏，layer 40 盖住上面所有层）——
+	# 放在存档系统之后：菜单里的存档列表复用同一个 SaveSystem 实例，
+	# 再 new 一个会和正在用的那份状态对不上。
+	pause_menu = PauseS.new()
+	pause_menu.set_save_system(save_sys)   # 先注入再挂载，面板就不会自己再造一个存档系统
+	add_child(pause_menu)
+	pause_menu.closed.connect(_on_pause_closed)
+	pause_menu.quit_requested.connect(_on_pause_quit)
+	pause_menu.load_requested.connect(_on_pause_load)
+
 	GameBus.register_module("main", self)
 
 	_setup_rain()
@@ -179,6 +191,12 @@ func _consume_pending_load() -> void:
 
 ## 返回主界面（暂停菜单 / 触控系统按钮都走这里）
 func return_to_menu() -> void:
+	# 兜底：任何路径退出都要解除暂停。带着 paused 切场景会让主界面整个卡死，
+	# 而这种 bug 只在"从暂停菜单退出"这条路上出现，很难靠手测发现。
+	if get_tree() != null:
+		get_tree().paused = false
+	if GameBus != null:
+		GameBus.ui_blocking = false
 	if save_sys != null:
 		save_sys.save(0)            # 离开前留一份自动存档，避免进度丢失
 	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
@@ -616,13 +634,52 @@ func _find_critter_at(pos: Vector3) -> Huntable:
 
 
 # ——————————————— 输入 ———————————————
+## 系统返回键（Android 返回手势 / 键）。
+## _notification 不受 get_tree().paused 影响，所以暂停菜单开着时也一定收得到；
+## 统一走 _back_requested()，与键盘 Esc 共用同一套"逐层退出"逻辑。
+func _notification(what: int) -> void:
+	if what == Node.NOTIFICATION_WM_GO_BACK_REQUEST:
+		_back_requested()
+
+
+## Esc / 返回键的统一处理：从最内层往外一层层退。
+## 顺序：暂停菜单子面板 → 暂停菜单 → 背包 → 建造模式 → 都没了才开暂停菜单。
+func _back_requested() -> void:
+	if pause_menu != null and pause_menu.go_back():
+		return
+	_do_action("esc")
+
+
+## 返回键去重：Android 上 _notification 与 ui_cancel 可能【同时】报到同一个返回动作，
+## 两次都处理就成了"打开又立刻关闭"，看起来像按了没反应。
+## 窗口取 100ms——足够盖住同一帧的重复，又不会吞掉玩家正常的连按。
+var _back_last_ms := 0
+
+
+func _back_debounce() -> bool:
+	var now := Time.get_ticks_msec()
+	if now - _back_last_ms < 100:
+		return false
+	_back_last_ms = now
+	return true
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	# 【为什么 Esc 要在这里单独接一次】ui_cancel 除了键盘 Esc 还覆盖手柄的 B、
+	# 以及部分平台把返回键也映射成它。但 Android 返回键主要走 _notification，
+	# 两边都发时会出现"开一下又关一下"等于没反应，所以这里用时间窗去重。
+	if event.is_action_pressed("ui_cancel"):
+		if _back_debounce():
+			_back_requested()
+			get_viewport().set_input_as_handled()
+		return
+
 	# 背包打开时只放行"关背包"和"再按一次背包键"，其余游戏输入一律吞掉。
 	# 否则会出现"点背包里的武器按钮 -> 同一帧鼠标左键也触发一次挥砍"。
 	if inv_ui != null and inv_ui.is_open():
 		if event is InputEventKey and event.pressed and not event.echo:
 			match event.keycode:
-				KEY_ESCAPE: _do_action("esc")
+				KEY_ESCAPE: _back_requested()
 				KEY_I, KEY_TAB: _do_action("bag")
 		return
 
@@ -648,7 +705,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_M: _do_action("mute")
 			KEY_T: _do_action("time")
 			KEY_H: _do_action("help")
-			KEY_ESCAPE: _do_action("esc")
+			KEY_ESCAPE: _back_requested()
 
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_LEFT:
@@ -709,13 +766,26 @@ func _do_action(a: String) -> void:
 				var on := not hud.help_label.visible
 				hud.show_help_panel(on)
 		"esc":
-			# Esc 是"退出当前这一层"：先关背包，再退建造模式
+			# Esc 是"退出当前这一层"：先关背包，再退建造模式，都没有才开暂停菜单。
+			# 注意暂停菜单自身的关闭不在这里——它走 pause_menu.go_back()，
+			# 因为菜单打开时游戏是 paused 的，_unhandled_input 根本不会跑到这里。
 			if inv_ui != null and inv_ui.is_open():
 				inv_ui.close()
 				return
-			_set_build_mode(false)
-			_restore_hotbar_after_build()
-			_refresh_preview()
+			if build_mode:
+				_set_build_mode(false)
+				_restore_hotbar_after_build()
+				_refresh_preview()
+				return
+			_toggle_pause()
+		"pause":
+			_toggle_pause()
+		"reset_joy":
+			# 设置面板里"重置摇杆"发来的：光写配置文件不够，挂载中的
+			# TouchControls 不会重读，必须让它自己重排一次。
+			var tc := get_node_or_null("TouchControls")
+			if tc != null and tc.has_method("reset_joy_position"):
+				tc.reset_joy_position()
 		"menu":
 			return_to_menu()
 		"jump":
@@ -825,10 +895,51 @@ func _toggle_bag() -> void:
 
 
 func _on_bag_closed() -> void:
-	# 关背包的同一帧可能有手指还按着，触控层要清一次残留状态
+	_release_touch()
+
+
+## 关掉任何模态界面后都要清一次触控残留：同一帧可能还有手指按着，
+## 不清就会出现"关掉菜单后角色自己往前走"。
+func _release_touch() -> void:
 	var tc := get_node_or_null("TouchControls")
 	if tc != null and tc.has_method("release_all"):
 		tc.release_all()
+
+
+# ——————————————— 暂停菜单 ———————————————
+func _toggle_pause() -> void:
+	if pause_menu == null:
+		return
+	if pause_menu.is_open():
+		pause_menu.close()
+		return
+	# 背包与暂停菜单叠在一起时，关掉菜单会露出一个孤儿背包，先收掉
+	if inv_ui != null and inv_ui.is_open():
+		inv_ui.close()
+	# 建造模式【不】主动退出：玩家可能只是中途看一眼，回来要接着摆。
+	# 暂停期间预览不动，没有副作用。
+	pause_menu.open()
+
+
+func _on_pause_closed() -> void:
+	_release_touch()
+
+
+func _on_pause_quit() -> void:
+	# 菜单自己已经解除了暂停（否则主界面会以 paused 状态启动、一动不动）
+	return_to_menu()
+
+
+## 菜单里选了槽位：先关菜单解除暂停，再就地读档回到这个世界
+func _on_pause_load(slot: int) -> void:
+	if save_sys == null:
+		return
+	pause_menu.close()
+	var ok: bool = save_sys.load(slot)
+	# 武器槽位与物品栏是存档内容的一部分，读档后要重建下发
+	_rebuild_hotbar()
+	if hud != null:
+		hud.toast("已读取槽位 %d" % (slot + 1) if ok else "读取失败")
 
 
 ## 背包数据源：资源计数（只读快照）

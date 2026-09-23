@@ -29,23 +29,16 @@ var _title_box: VBoxContainer
 var _ver_label: Label
 var _toast: Label
 
-var _slot_buttons: Array = []
-var _slot_del_buttons: Array = []
-var _vol_slider: HSlider
-var _vol_value: Label
-var _quality_option: OptionButton
-var _fs_check: CheckBox
+var _slots: SaveSlotsPanel
+var _settings: SettingsPanel
 
-# 设置项（暂存内存，落盘到 user://settings.cfg）
-var _vol_master := 1.0
-var _quality := 1
-var _fullscreen := false
-var _joystick_offset := Vector2(-1.0, -1.0)   # -1 表示"未自定义"，用默认贴边位置
-var _settings_path := "user://settings.cfg"
+## 【为什么设置项不在这里】设置要落盘到 user://settings.cfg，主界面和游戏内
+## 暂停菜单各写一份读写逻辑，将来加一项就得改两处。所以读写只在
+## scripts/settings_panel.gd 里有一份，两边共用同一个控件类。
 
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
 	_build_background()
@@ -57,9 +50,11 @@ func _ready() -> void:
 	# SaveSystem.setup 的类型签名是 Node3D，菜单里没有玩家世界；
 	# 传背景世界的根节点只为了满足签名——菜单只用它的读取类 API（slot_text/delete_save）。
 	_save.setup(_world_ref)
+	# 存档列表复用菜单自己的 SaveSystem：它已经 setup 过，
+	# 再让面板自己 new 一个会和这份状态对不上。
+	if _slots != null:
+		_slots.set_save_system(_save)
 
-	_load_settings()
-	_refresh_slots()
 	_show_panel("main")
 	_check_auto_shot()
 
@@ -154,7 +149,7 @@ func _build_background() -> void:
 	var cont := SubViewportContainer.new()
 	cont.name = "WorldBG"
 	cont.stretch = true
-	cont.set_anchors_preset(Control.PRESET_FULL_RECT)
+	cont.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	cont.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	cont.add_child(sub)
 	add_child(cont)
@@ -164,7 +159,7 @@ func _build_background() -> void:
 	var dim := ColorRect.new()
 	dim.name = "Dim"
 	dim.color = Color(0.05, 0.07, 0.12, 0.46)
-	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(dim)
 
@@ -173,7 +168,7 @@ func _build_background() -> void:
 	grad.texture = _make_vignette()
 	grad.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	grad.stretch_mode = TextureRect.STRETCH_SCALE
-	grad.set_anchors_preset(Control.PRESET_FULL_RECT)
+	grad.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	grad.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(grad)
 
@@ -203,7 +198,7 @@ func _build_ui() -> void:
 
 	var root := Control.new()
 	root.name = "UiRoot"
-	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(root)
 
@@ -212,7 +207,7 @@ func _build_ui() -> void:
 	_title_box.name = "TitleBox"
 	_title_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	_title_box.add_theme_constant_override("separation", 2)
-	_title_box.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	_title_box.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	_title_box.offset_top = 84.0
 	_title_box.offset_bottom = 230.0
 	_title_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -239,20 +234,28 @@ func _build_ui() -> void:
 	_title_box.add_child(sub_title)
 
 	# 中央菜单盒
+	# 【为什么套 CenterContainer】给 VBoxContainer 设 PRESET_CENTER 是个陷阱：
+	# 它在按钮加进来之前就把 offsets 按"当时最小尺寸"（0）算死，之后按钮撑开
+	# 只会往右下长，菜单会整体偏离屏幕中心。CenterContainer 每次重排都会重新居中。
+	var center := CenterContainer.new()
+	center.name = "MenuCenter"
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(center)
+
 	_menu_box = VBoxContainer.new()
 	_menu_box.name = "MenuBox"
 	_menu_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	_menu_box.add_theme_constant_override("separation", 14)
-	_menu_box.set_anchors_preset(Control.PRESET_CENTER)
 	_menu_box.custom_minimum_size = Vector2(340.0, 0.0)
-	root.add_child(_menu_box)
+	center.add_child(_menu_box)
 
 	# 左下角版本号 / 右下角提示
 	_ver_label = Label.new()
 	_ver_label.text = "v0.3 · Godot 4.7"
 	_ver_label.add_theme_font_size_override("font_size", 15)
 	_ver_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85, 0.75))
-	_ver_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_ver_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	_ver_label.offset_left = 22.0
 	_ver_label.offset_top = -40.0
 	_ver_label.offset_bottom = -16.0
@@ -266,17 +269,28 @@ func _build_ui() -> void:
 	_toast.add_theme_color_override("font_color", Color(1.0, 0.92, 0.72))
 	_toast.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
 	_toast.add_theme_constant_override("shadow_offset_y", 2)
-	_toast.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	_toast.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	_toast.offset_top = -84.0
 	_toast.offset_bottom = -52.0
 	_toast.modulate.a = 0.0
 	_toast.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(_toast)
 
-	# 子面板
+	# 子面板（存档列表与设置是与宿主无关的纯控件，与暂停菜单共用同一个类）
 	_panels["main"] = _menu_box
-	_build_slots_panel(root)
-	_build_settings_panel(root)
+
+	_slots = SaveSlotsPanel.new()
+	_slots.visible = false
+	_slots.slot_picked.connect(_load_slot)
+	_slots.back_requested.connect(func(): _show_panel("main"))
+	root.add_child(_slots)
+	_panels["slots"] = _slots
+
+	_settings = SettingsPanel.new()
+	_settings.visible = false
+	_settings.back_requested.connect(func(): _show_panel("main"))
+	root.add_child(_settings)
+	_panels["settings"] = _settings
 
 	if GameBus != null:
 		GameBus.toast.connect(_on_toast)
@@ -291,10 +305,21 @@ func _show_panel(name: String) -> void:
 
 	if name == "main":
 		_rebuild_main_menu()
-	elif name == "slots":
-		_refresh_slots()
-	elif name == "settings":
-		_refresh_settings()
+	elif name == "slots" and _slots != null:
+		_slots.set_ui_scale(_ui_scale())
+		_slots.refresh()
+	elif name == "settings" and _settings != null:
+		_settings.set_ui_scale(_ui_scale())
+		_settings.refresh()
+
+
+## 主界面的分辨率缩放：与暂停菜单同一套算法（短边 / 810，夹在 0.85~1.8）。
+## 手机上按 1440x810 定死的 54px 按钮只有屏高的 5%，点不准。
+func _ui_scale() -> float:
+	var vs := get_viewport().get_visible_rect().size
+	if vs.x < 8.0 or vs.y < 8.0:
+		return 1.0
+	return clampf(minf(vs.x, vs.y) / 810.0, 0.85, 1.8)
 
 
 func _rebuild_main_menu() -> void:
@@ -302,10 +327,11 @@ func _rebuild_main_menu() -> void:
 		c.queue_free()
 
 	var has_any := false
-	for i in range(SaveS.SLOTS):
-		if _has_save(i):
-			has_any = true
-			break
+	if _save != null:
+		for i in range(SaveS.SLOTS):
+			if _save.has_save(i):
+				has_any = true
+				break
 
 	_add_menu_button("开始新游戏", func(): _start_new())
 	_add_menu_button("读取存档", func(): _show_panel("slots"), not has_any)
@@ -314,11 +340,12 @@ func _rebuild_main_menu() -> void:
 
 
 func _add_menu_button(text: String, cb: Callable, disabled := false) -> Button:
+	var k := _ui_scale()
 	var b := Button.new()
 	b.text = text
 	b.disabled = disabled
-	b.custom_minimum_size = Vector2(340.0, 54.0)
-	b.add_theme_font_size_override("font_size", 24)
+	b.custom_minimum_size = Vector2(340.0, 54.0) * k
+	b.add_theme_font_size_override("font_size", maxi(14, int(24.0 * k)))
 
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = C_BTN
@@ -383,313 +410,6 @@ func _disabled_style() -> StyleBoxFlat:
 	return sb
 
 
-# ——————————————— 存档面板 ———————————————
-func _build_slots_panel(root: Control) -> void:
-	var box := VBoxContainer.new()
-	box.name = "SlotsPanel"
-	box.alignment = BoxContainer.ALIGNMENT_CENTER
-	box.add_theme_constant_override("separation", 12)
-	box.set_anchors_preset(Control.PRESET_CENTER)
-	box.custom_minimum_size = Vector2(560.0, 0.0)
-	box.visible = false
-	root.add_child(box)
-
-	var h := Label.new()
-	h.text = "选择存档"
-	h.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	h.add_theme_font_size_override("font_size", 34)
-	h.add_theme_color_override("font_color", C_TITLE)
-	h.add_theme_color_override("font_shadow_color", C_TITLE_SHADOW)
-	h.add_theme_constant_override("shadow_offset_y", 3)
-	box.add_child(h)
-
-	var tip := Label.new()
-	tip.text = "当前版本存档：新游戏会覆盖所选槽位"
-	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	tip.add_theme_font_size_override("font_size", 15)
-	tip.add_theme_color_override("font_color", Color(0.9, 0.88, 0.82, 0.75))
-	box.add_child(tip)
-
-	for i in range(SaveS.SLOTS):
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 8)
-
-		var b := Button.new()
-		b.custom_minimum_size = Vector2(430.0, 58.0)
-		b.add_theme_font_size_override("font_size", 18)
-		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		b.add_theme_color_override("font_color", C_SUB)
-		b.add_theme_color_override("font_hover_color", Color(0.14, 0.10, 0.05))
-		b.add_theme_stylebox_override("normal", _btn_style(C_BTN))
-		b.add_theme_stylebox_override("hover", _btn_style(C_BTN_HOVER))
-		b.add_theme_stylebox_override("pressed", _btn_style(Color(0.62, 0.42, 0.16, 0.9)))
-		b.add_theme_stylebox_override("disabled", _disabled_style())
-		b.add_theme_color_override("font_disabled_color", Color(0.72, 0.72, 0.72, 0.34))
-		var slot_idx := i
-		b.pressed.connect(func(): _load_slot(slot_idx))
-		row.add_child(b)
-		_slot_buttons.append(b)
-
-		var del := Button.new()
-		del.text = "删除"
-		del.custom_minimum_size = Vector2(96.0, 58.0)
-		del.add_theme_font_size_override("font_size", 16)
-		del.add_theme_color_override("font_color", Color(1.0, 0.72, 0.66))
-		del.add_theme_color_override("font_hover_color", Color(0.14, 0.10, 0.05))
-		del.add_theme_stylebox_override("normal", _btn_style(Color(0.32, 0.12, 0.10, 0.62)))
-		del.add_theme_stylebox_override("hover", _btn_style(Color(0.90, 0.42, 0.34, 0.90)))
-		del.add_theme_stylebox_override("pressed", _btn_style(Color(0.62, 0.20, 0.16, 0.9)))
-		del.add_theme_stylebox_override("disabled", _disabled_style())
-		del.add_theme_color_override("font_disabled_color", Color(0.72, 0.72, 0.72, 0.30))
-		del.pressed.connect(func(): _delete_slot(slot_idx))
-		row.add_child(del)
-		_slot_del_buttons.append(del)
-
-		box.add_child(row)
-
-	var back := _add_menu_button_to(box, "返回", func(): _show_panel("main"))
-	back.custom_minimum_size = Vector2(240.0, 46.0)
-
-	_panels["slots"] = box
-
-
-func _has_save(slot: int) -> bool:
-	var p := "%s/slot_%d.save" % [SaveS.SAVE_DIR, slot]
-	return FileAccess.file_exists(p)
-
-
-func _slot_label(slot: int) -> String:
-	if not _has_save(slot):
-		return "槽位 %d  ·  空" % (slot + 1)
-	# 直接复用 SaveSystem 的展示逻辑（它会读 __meta 里的天数/季节/时间）
-	var probe := _save
-	if probe != null:
-		var txt := probe.slot_text(slot)
-		if txt != "":
-			return txt
-	return "槽位 %d  ·  有存档" % (slot + 1)
-
-
-func _refresh_slots() -> void:
-	if _slot_buttons.is_empty():
-		return
-	for i in range(_slot_buttons.size()):
-		var b: Button = _slot_buttons[i]
-		b.text = _slot_label(i)
-		var has := _has_save(i)
-		b.disabled = not has
-		var d: Button = _slot_del_buttons[i]
-		d.disabled = not has
-
-
-func _delete_slot(slot: int) -> void:
-	if _save == null:
-		return
-	_save.delete_save(slot)
-	_refresh_slots()
-	_toast_msg("已删除槽位 %d" % (slot + 1))
-
-
-# ——————————————— 设置面板 ———————————————
-func _build_settings_panel(root: Control) -> void:
-	var box := VBoxContainer.new()
-	box.name = "SettingsPanel"
-	box.alignment = BoxContainer.ALIGNMENT_CENTER
-	box.add_theme_constant_override("separation", 14)
-	box.set_anchors_preset(Control.PRESET_CENTER)
-	box.custom_minimum_size = Vector2(520.0, 0.0)
-	box.visible = false
-	root.add_child(box)
-
-	var h := Label.new()
-	h.text = "设置"
-	h.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	h.add_theme_font_size_override("font_size", 34)
-	h.add_theme_color_override("font_color", C_TITLE)
-	h.add_theme_color_override("font_shadow_color", C_TITLE_SHADOW)
-	h.add_theme_constant_override("shadow_offset_y", 3)
-	box.add_child(h)
-
-	# 主音量
-	var row1 := HBoxContainer.new()
-	row1.add_theme_constant_override("separation", 12)
-	var l1 := Label.new()
-	l1.text = "主音量"
-	l1.custom_minimum_size = Vector2(140.0, 0.0)
-	l1.add_theme_font_size_override("font_size", 19)
-	l1.add_theme_color_override("font_color", C_SUB)
-	row1.add_child(l1)
-	_vol_slider = HSlider.new()
-	_vol_slider.min_value = 0.0
-	_vol_slider.max_value = 1.0
-	_vol_slider.step = 0.05
-	_vol_slider.value = 1.0
-	_vol_slider.custom_minimum_size = Vector2(260.0, 32.0)
-	_vol_slider.value_changed.connect(_on_vol)
-	row1.add_child(_vol_slider)
-	_vol_value = Label.new()
-	_vol_value.custom_minimum_size = Vector2(64.0, 0.0)
-	_vol_value.add_theme_font_size_override("font_size", 18)
-	_vol_value.add_theme_color_override("font_color", C_SUB)
-	row1.add_child(_vol_value)
-	box.add_child(row1)
-
-	# 画质
-	var row2 := HBoxContainer.new()
-	row2.add_theme_constant_override("separation", 12)
-	var l2 := Label.new()
-	l2.text = "画质"
-	l2.custom_minimum_size = Vector2(140.0, 0.0)
-	l2.add_theme_font_size_override("font_size", 19)
-	l2.add_theme_color_override("font_color", C_SUB)
-	row2.add_child(l2)
-	_quality_option = OptionButton.new()
-	_quality_option.add_item("低（省电）", 0)
-	_quality_option.add_item("中（默认）", 1)
-	_quality_option.add_item("高（清晰）", 2)
-	_quality_option.custom_minimum_size = Vector2(260.0, 36.0)
-	_quality_option.item_selected.connect(_on_quality)
-	row2.add_child(_quality_option)
-	box.add_child(row2)
-
-	# 全屏
-	var row3 := HBoxContainer.new()
-	row3.add_theme_constant_override("separation", 12)
-	var l3 := Label.new()
-	l3.text = "全屏显示"
-	l3.custom_minimum_size = Vector2(140.0, 0.0)
-	l3.add_theme_font_size_override("font_size", 19)
-	l3.add_theme_color_override("font_color", C_SUB)
-	row3.add_child(l3)
-	_fs_check = CheckBox.new()
-	_fs_check.text = "开启"
-	_fs_check.add_theme_font_size_override("font_size", 18)
-	_fs_check.add_theme_color_override("font_color", C_SUB)
-	_fs_check.toggled.connect(_on_fullscreen)
-	row3.add_child(_fs_check)
-	box.add_child(row3)
-
-	# 摇杆位置提示（自定义入口在游戏内触控层，这里只做说明 + 重置）
-	var note := Label.new()
-	note.text = "提示：手机版进入游戏后可长按左下角摇杆拖动位置，\n松手即保存为该设备的习惯位置。"
-	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	note.add_theme_font_size_override("font_size", 15)
-	note.add_theme_color_override("font_color", Color(0.88, 0.86, 0.78, 0.78))
-	box.add_child(note)
-
-	var row4 := HBoxContainer.new()
-	row4.alignment = BoxContainer.ALIGNMENT_CENTER
-	row4.add_theme_constant_override("separation", 12)
-	var reset := _add_menu_button_to(row4, "重置摇杆位置", func(): _reset_joystick())
-	reset.custom_minimum_size = Vector2(240.0, 46.0)
-	box.add_child(row4)
-
-	var back := _add_menu_button_to(box, "返回", func(): _show_panel("main"))
-	back.custom_minimum_size = Vector2(240.0, 46.0)
-
-	_panels["settings"] = box
-
-
-func _add_menu_button_to(parent: Node, text: String, cb: Callable) -> Button:
-	var b := Button.new()
-	b.text = text
-	b.custom_minimum_size = Vector2(340.0, 54.0)
-	b.add_theme_font_size_override("font_size", 22)
-	b.add_theme_stylebox_override("normal", _btn_style(C_BTN))
-	b.add_theme_stylebox_override("hover", _btn_style(C_BTN_HOVER))
-	b.add_theme_stylebox_override("pressed", _btn_style(Color(0.62, 0.42, 0.16, 0.9)))
-	b.add_theme_color_override("font_color", C_SUB)
-	b.add_theme_color_override("font_hover_color", Color(0.14, 0.10, 0.05))
-	b.pressed.connect(cb)
-	parent.add_child(b)
-	return b
-
-
-func _refresh_settings() -> void:
-	if _vol_slider != null:
-		_vol_slider.value = _vol_master
-	if _quality_option != null:
-		_quality_option.select(_quality)
-	if _fs_check != null:
-		_fs_check.button_pressed = _fullscreen
-
-
-func _on_vol(v: float) -> void:
-	_vol_master = v
-	if _vol_value != null:
-		_vol_value.text = "%d%%" % int(round(v * 100.0))
-	_apply_audio_volume()
-	_save_settings()
-
-
-func _apply_audio_volume() -> void:
-	var bus := AudioServer.get_bus_index("Master")
-	if bus < 0:
-		return
-	AudioServer.set_bus_mute(bus, _vol_master <= 0.001)
-	AudioServer.set_bus_volume_db(bus, linear_to_db(clampf(_vol_master, 0.001, 1.0)))
-
-
-func _on_quality(idx: int) -> void:
-	_quality = idx
-	var vp := get_viewport()
-	match idx:
-		0:
-			vp.msaa_3d = Viewport.MSAA_DISABLED
-			vp.positional_shadow_atlas_size = 1024
-		1:
-			vp.msaa_3d = Viewport.MSAA_2X
-			vp.positional_shadow_atlas_size = 2048
-		2:
-			vp.msaa_3d = Viewport.MSAA_4X
-			vp.positional_shadow_atlas_size = 4096
-	_save_settings()
-
-
-func _on_fullscreen(on: bool) -> void:
-	_fullscreen = on
-	DisplayServer.window_set_mode(
-		DisplayServer.WINDOW_MODE_FULLSCREEN if on else DisplayServer.WINDOW_MODE_WINDOWED
-	)
-	_save_settings()
-
-
-func _reset_joystick() -> void:
-	_joystick_offset = Vector2(-1.0, -1.0)
-	_save_settings()
-	_toast_msg("摇杆位置已重置为默认")
-
-
-# ——————————————— 设置持久化 ———————————————
-func _load_settings() -> void:
-	var cf := ConfigFile.new()
-	if cf.load(_settings_path) != OK:
-		_on_vol(_vol_master)
-		return
-	_vol_master = float(cf.get_value("audio", "master", 1.0))
-	_quality = int(cf.get_value("video", "quality", 1))
-	_fullscreen = bool(cf.get_value("video", "fullscreen", false))
-	_joystick_offset = Vector2(
-		float(cf.get_value("touch", "joy_x", -1.0)),
-		float(cf.get_value("touch", "joy_y", -1.0))
-	)
-	_apply_audio_volume()
-	if _vol_value != null:
-		_vol_value.text = "%d%%" % int(round(_vol_master * 100.0))
-	_on_quality(_quality)
-	if _fullscreen:
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
-
-
-func _save_settings() -> void:
-	var cf := ConfigFile.new()
-	cf.set_value("audio", "master", _vol_master)
-	cf.set_value("video", "quality", _quality)
-	cf.set_value("video", "fullscreen", _fullscreen)
-	cf.set_value("touch", "joy_x", _joystick_offset.x)
-	cf.set_value("touch", "joy_y", _joystick_offset.y)
-	cf.save(_settings_path)
-
 
 # ——————————————— 流程 ———————————————
 func _start_new() -> void:
@@ -709,7 +429,7 @@ func _fade_to_game() -> void:
 	# 简单淡出，避免切场景时画面生硬跳变
 	var fade := ColorRect.new()
 	fade.color = Color(0, 0, 0, 0)
-	fade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	fade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	fade.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(fade)
 	var tw := create_tween()
@@ -718,7 +438,8 @@ func _fade_to_game() -> void:
 
 
 func _quit() -> void:
-	_save_settings()
+	# 不需要在这里存设置：SettingsPanel 每次改动都会立刻落盘，
+	# 退出时再存一次反而可能把默认值写回去覆盖掉玩家的调整。
 	get_tree().quit()
 
 

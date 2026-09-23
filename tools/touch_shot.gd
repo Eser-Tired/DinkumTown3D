@@ -104,7 +104,34 @@ func _ready() -> void:
 	get_viewport().get_texture().get_image().save_png(dir + "touch6_bag.png")
 	m._do_action("bag")
 
+	# —— 7) 暂停菜单：走真实的返回键入口，layer=40 应盖住上面所有层 ——
+	m._back_requested()
+	await get_tree().create_timer(0.8).timeout
+	await RenderingServer.frame_post_draw
+	print("PAUSE open=%s paused=%s" % [
+		str(m.pause_menu.is_open()), str(get_tree().paused)])
+	get_viewport().get_texture().get_image().save_png(dir + "touch7_pause.png")
+
+	# —— 8) 暂停菜单里的设置面板 ——
+	var b_set := _find_btn(m.pause_menu._main_box, "设置")
+	if b_set != null:
+		b_set.pressed.emit()
+		await get_tree().create_timer(0.6).timeout
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png(dir + "touch8_pause_settings.png")
+
+	# 收尾：必须解除暂停，否则进程退出后残留状态会影响后续脚本
+	m.pause_menu.close()
 	get_tree().quit()
+
+
+func _find_btn(box: Node, text: String) -> Button:
+	if box == null:
+		return null
+	for c in box.get_children():
+		if c is Button and (c as Button).text == text:
+			return c as Button
+	return null
 
 
 func _arg_str(args: PackedStringArray, key: String, def: String) -> String:
