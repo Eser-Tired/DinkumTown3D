@@ -13,6 +13,21 @@ var toast_label: Label
 var weapon_label: Label
 var toast_t := 0.0
 
+## —— 水域 ——
+## 水下遮罩：相机没入水面时压一层青绿，不用 Environment 雾是因为雾会影响
+## 整个场景的着色，而出水的那一帧要立刻恢复，遮罩的开关是瞬时的、可控的。
+var uw_overlay: ColorRect
+## 憋气条（只在憋气时显示）
+var breath_panel: Panel
+## 【为什么填充用 ColorRect 而不是 Panel】Panel 的颜色只能靠 modulate 乘，
+## 而默认主题的 Panel StyleBox 本身就是深灰——乘 1.0 还是深灰，填充根本看不出来。
+## ColorRect 的 color 是直接赋值，白色就是白色。
+var breath_fill: ColorRect
+var _breath_shown := false
+## 憋气条满格宽度。缩放后要用它算填充比例——不能拿面板宽度减边距，
+## 面板和填充的边距也随 k 缩放，两边各算一次必然对不上。
+var _breath_full_w := 312.0
+
 ## 右侧竖列（时钟 / 季节 / 武器）的面板引用，触控模式下要整体上移避让
 var _right_panels: Array = []
 ## 资源面板引用（触控模式下按 k 重排）
@@ -32,6 +47,8 @@ func touch_reserved_rects() -> Array:
 		out.append(Rect2(prompt_label.position, prompt_label.size))
 	if build_label != null and build_label.visible:
 		out.append(Rect2(build_label.position, build_label.size))
+	if breath_panel != null and breath_panel.visible:
+		out.append(Rect2(breath_panel.position, breath_panel.size))
 	return out
 
 const RES_NAME := {
@@ -48,6 +65,37 @@ const TOUCH_LEFT_COL_RIGHT := 154.0
 func _ready() -> void:
 	layer = 10
 	_build()
+	# 水下遮罩默认关闭；它铺满全屏，所以必须绝对不接鼠标事件
+	uw_overlay = ColorRect.new()
+	uw_overlay.name = "Underwater"
+	uw_overlay.color = Color(0.10, 0.34, 0.42, 0.42)
+	uw_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	uw_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	uw_overlay.visible = false
+	add_child(uw_overlay)
+
+
+## 相机是否在水面以下 —— 只负责开关那一层青绿遮罩
+func set_underwater(on: bool) -> void:
+	if uw_overlay != null:
+		uw_overlay.visible = on
+
+
+## 憋气条。v < 0 表示不憋气（隐藏）；0..1 是剩余量。
+func set_breath(v: float) -> void:
+	var show := v >= 0.0
+	if breath_panel == null or breath_fill == null:
+		return
+	if breath_panel.visible != show:
+		breath_panel.visible = show
+		breath_fill.visible = show
+		_breath_shown = show
+	if not show:
+		return
+	breath_fill.size = Vector2(maxf(0.0, _breath_full_w * clampf(v, 0.0, 1.0)),
+		breath_fill.size.y)
+	# 快没气时转红，给一个不用读数字的警告
+	breath_fill.color = Color(0.96, 0.97, 1.0) if v > 0.28 else Color(1.0, 0.42, 0.34)
 
 
 func _panel(pos: Vector2, size: Vector2, alpha := 0.55) -> Panel:
@@ -104,6 +152,18 @@ func _build() -> void:
 
 	_right_panels = [p_clock, p_season, p_weapon]
 
+	# 憋气条：沉在水下时才出现，放在屏幕正上方偏中，不挡视野也不跟资源栏打架
+	breath_panel = _panel(Vector2(560, 26), Vector2(320, 22), 0.62)
+	breath_panel.visible = false
+	add_child(breath_panel)
+	breath_fill = ColorRect.new()
+	breath_fill.color = Color(0.96, 0.97, 1.0)
+	breath_fill.position = Vector2(564, 30)
+	breath_fill.size = Vector2(312, 14)
+	breath_fill.visible = false
+	add_child(breath_fill)
+	_breath_full_w = 312.0
+
 	# 交互提示（屏幕中下）
 	prompt_label = _label(22, Vector2(390, 690), 660)
 	prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -119,7 +179,7 @@ func _build() -> void:
 	add_child(help_panel)
 	help_label = _label(16, Vector2(34, 650), 540)
 	help_label.size = Vector2(540, 140)
-	help_label.text = "WASD/方向键 移动 · Shift 奔跑 · 空格 跳跃\n鼠标右键拖拽 转视角 · 滚轮 缩放\nE 采集 · 左键 攻击 · Q 换武器 · 1-4 切物品栏\nB 建造模式 · 建造中 1-4 选建筑 · 左键放置\nI 背包 · F 农事 · G 换作物 · T 加速时间 · H 隐藏帮助\nF2 保存 · F3 读取 · M 静音 · Esc 暂停菜单"
+	help_label.text = "WASD/方向键 移动 · Shift 奔跑 · 空格 跳跃\n鼠标右键拖拽 转视角 · 滚轮 缩放\nE 采集 · 左键 攻击 · Q 换武器 · 1-4 切物品栏\nB 建造模式 · 建造中 1-4 选建筑 · 左键放置\n进水里自动游泳 · Ctrl 下潜、松开上浮（憋气有限）\nI 背包 · F 农事 · G 换作物 · T 加速时间 · H 隐藏帮助\nF2 保存 · F3 读取 · M 静音 · Esc 暂停菜单"
 	add_child(help_label)
 
 	# 浮动提示
@@ -157,7 +217,8 @@ func set_touch_mode(w: float, h: float, k: float, k_text: float = -1.0) -> float
 		+ "屏幕空白处拖动转视角，双指捏合缩放\n"
 		+ "点击画面：采集附近的资源 / 攻击动物\n"
 		+ "底栏 4 格：点一下切换武器或建筑\n"
-		+ "右侧：使用（攻击/放置）· 跳 · 农事 · 旋转\n"
+		+ "右侧：使用（攻击/放置）· 跳 · 潜 · 农事 · 旋转\n"
+		+ "进水里自动游泳，按住「潜」下潜、松开上浮\n"
 		+ "左上：菜单 · 背包 · 建造　　右上：存 / 读 / 加速 / 静音"
 		+ "\n背包里可点武器直接装备，再点背包键或 Esc 关闭\n"
 		+ "系统返回键 / 左上「菜单」唤出暂停菜单（会停下时间与天气）"
@@ -234,6 +295,20 @@ func set_touch_mode(w: float, h: float, k: float, k_text: float = -1.0) -> float
 	build_label.size = Vector2(330.0 * k, 170.0 * kt)
 	build_label.add_theme_font_size_override("font_size", maxi(12, int(18.0 * kt)))
 	build_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+
+	# —— 憋气条：贴屏幕顶部正中 ——
+	# 【为什么是顶部正中】左上被资源栏占着、右上被系统小钮占着、下方全是操作键，
+	# 顶部中间是整块屏幕上唯一空着的地方。
+	if breath_panel != null:
+		breath_panel.position = Vector2(w * 0.5 - 160.0 * kt, 24.0 * k)
+		breath_panel.size = Vector2(320.0 * kt, 22.0 * kt)
+	if breath_fill != null:
+		var pad := 4.0 * kt
+		breath_fill.position = breath_panel.position + Vector2(pad, pad)
+		breath_fill.size = Vector2(312.0 * kt, 14.0 * kt)
+		# 满格宽度必须跟着缩放走：set_breath 用它算填充比例，
+		# 面板位置改了而这里没改的话，条子会一直按旧宽度画。
+		_breath_full_w = 312.0 * kt
 
 	return cy
 

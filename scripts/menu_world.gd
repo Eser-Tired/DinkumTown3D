@@ -131,7 +131,8 @@ func _flora_pass(rng: RandomNumberGenerator, count: int, min_town: float,
 			var c := Vector2(rng.randf_range(-96.0, 96.0), rng.randf_range(-96.0, 96.0))
 			if c.distance_to(TOWN) < min_town or c.distance_to(LAKE) < min_lake:
 				continue
-			if terrain.height_at(c.x, c.y) < 0.95:
+			# 水里不撒：跟水位比，别跟绝对高度比（地形基准高度会变，见 terrain.BASE_LIFT）
+			if terrain.water_depth_at(c.x, c.y) > 0.0:
 				continue
 			var clash := false
 			for q in placed:

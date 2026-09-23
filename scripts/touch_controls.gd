@@ -47,6 +47,7 @@ var _tap_id := -1
 var _tap_from := Vector2.ZERO
 
 var _btn_rects: Array = []
+var _hold_btns: Array = []      ## 按住型按钮，release_all 时要复位
 var _k := 1.0
 var _vs := REF
 
@@ -145,6 +146,7 @@ func _rebuild() -> void:
 
 	_btn_rects.clear()
 	_hotbar_btns.clear()
+	_hold_btns.clear()
 	for c in get_children():
 		if c != _joy:
 			c.queue_free()
@@ -203,6 +205,10 @@ func _rebuild() -> void:
 	_btn_at("使用", "use", W - 128.0 * k, H - 168.0 * k, 140.0 * k, 140.0 * k, 24)
 	_btn_at("跳", "jump", W - 264.0 * k, H - 246.0 * k, 108.0 * k, 108.0 * k, 21)
 	_btn_at("农事", "farm", W - 300.0 * k, H - 112.0 * k, 104.0 * k, 104.0 * k, 19)
+	# 下潜键：按【住】才往下，所以不能用 pressed（那是抬手才触发的一次性信号）。
+	# 放在「跳」正上方——两个都是垂直方向的键，位置一致好形成肌肉记忆；
+	# 陆地上它不起作用，没必要藏起来。
+	_make_hold_button("潜", "dive", W - 264.0 * k, H - 372.0 * k, 108.0 * k, 74.0 * k, 20)
 	# 建造模式专用：旋转 / 放置。放在系统钮下方，与 HUD 竖列彻底分离。
 	var rot_y := sys_y2 + 82.0 * k
 	_btn_at("旋转", "rotate", W - 128.0 * k, rot_y, 118.0 * k, 58.0 * k, 19)
@@ -233,6 +239,38 @@ func _make_sys_button(text: String, action: String, cx: float, cy: float, w: flo
 	var b := _btn_at(text, action, cx, cy, w, h, 17)
 	_style(b, Color(0.08, 0.10, 0.14, 0.46), Color(0.14, 0.20, 0.28, 0.72))
 	return b
+
+
+## 「按住」型按钮：按下即生效、松手即结束（下潜用）。
+## 【为什么不能复用 _btn_at】那是靠 pressed 信号的一次性动作，
+## 而 Button.pressed 是【抬手】时才发的——用按下潜会变成"松手才潜一下"，
+## 而且没法持续下潜。这里改用 button_down / button_up 维护一个状态位。
+func _make_hold_button(text: String, action: String, cx: float, cy: float,
+		w: float, h: float, fs: int) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.add_theme_font_size_override("font_size", maxi(10, int(fs * _k)))
+	var sz := Vector2(w, h)
+	b.size = sz
+	b.position = Vector2(cx - sz.x * 0.5, cy - sz.y * 0.5)
+	b.focus_mode = Control.FOCUS_NONE
+	_style(b, Color(0.12, 0.20, 0.30, 0.54), Color(0.24, 0.44, 0.60, 0.86))
+	var act := action
+	b.button_down.connect(func(): _set_hold(act, true))
+	b.button_up.connect(func(): _set_hold(act, false))
+	# 手指按住后滑出按钮范围也会收到 button_up，但为保险再挂一个
+	b.mouse_exited.connect(func():
+		if not b.button_pressed:
+			_set_hold(act, false))
+	add_child(b)
+	_btn_rects.append(Rect2(b.position, sz))
+	_hold_btns.append(b)
+	return b
+
+
+func _set_hold(action: String, on: bool) -> void:
+	if action == "dive":
+		GameBus.touch_dive = on
 
 
 func _style(b: Button, normal: Color, pressed: Color) -> void:
@@ -332,6 +370,11 @@ func release_all() -> void:
 	GameBus.touch_look = Vector2.ZERO
 	GameBus.touch_zoom = 0.0
 	GameBus.touch_run = false
+	# 「潜」是按住型状态位：不清的话关掉菜单后玩家会一直往下沉
+	GameBus.touch_dive = false
+	for hb in _hold_btns:
+		if is_instance_valid(hb):
+			(hb as Button).button_pressed = false
 
 
 func _on_touch(idx: int, pos: Vector2, pressed: bool) -> void:

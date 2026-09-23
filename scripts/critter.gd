@@ -74,6 +74,12 @@ func _process(dt: float) -> void:
 	p.x = clampf(p.x, -lim, lim)
 	p.z = clampf(p.z, -lim, lim)
 	p.y = terrain.height_at(p.x, p.z)
+	# 不进水：动物是贴地走的（p.y 直接取地形高度），一旦走进湖里就会一路沉到湖底，
+	# 变成"水下袋鼠"。这里直接作废这一步移动——比给动物写一套游泳逻辑便宜得多，
+	# 观感上也对：袋鼠本来就绕开水走。
+	if terrain != null and terrain.has_method("water_depth_at") \
+			and terrain.water_depth_at(p.x, p.z) > 0.0:
+		p = global_position
 	global_position = p
 
 	if hop_t >= 0.0:

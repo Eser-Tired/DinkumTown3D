@@ -264,6 +264,9 @@ func _on_touch_tap(pos: Vector2) -> void:
 			_set_preview_pos(g)
 		return
 
+	if not _can_act():
+		return
+
 	# 优先打动物：动物会跑，机会成本比资源高
 	var beast := _find_critter_in_arc(player.global_position, player.aim_dir(), true)
 	if beast != null:
@@ -451,10 +454,13 @@ func _build_town() -> void:
 		_place(PropsS.make_lamp(), p.x, p.y, rng.randf() * TAU)
 
 	# 码头：从岸边伸入水潭
+	# 【为什么用 water_depth_at 而不是 height_at】地形整体抬升过（见 terrain.BASE_LIFT），
+	# 拿绝对高度跟 0.9 比已经不是在判断"有没有水"了。所有"是不是水"的判断
+	# 都必须走 water_depth_at，否则地形一变就集体失效。
 	var dock_z := 60.0
 	for d in range(30, 62):
 		var cand := LAKE + Vector2(0.0, float(d))
-		if terrain.height_at(cand.x, cand.y) > 0.9:
+		if terrain.water_depth_at(cand.x, cand.y) <= 0.0:
 			dock_z = LAKE.y + float(d)
 			break
 	if dock_z > 59.0:
@@ -473,7 +479,10 @@ func _build_town() -> void:
 			var p: Vector2 = LAKE + dir * float(d)
 			if absf(p.x) > 100.0 or absf(p.y) > 100.0:
 				break
-			if terrain.height_at(p.x, p.y) > 1.0 and terrain.height_at(p.x, p.y) < 5.0:
+			# 岸边（水线以上、但还没爬上高坡）——用离水面的高差判定，
+			# 不用绝对高度：地形基准高度改过一次，绝对阈值就全靠不住了
+			var above: float = terrain.height_at(p.x, p.y) - terrain.water_level()
+			if above > 0.2 and above < 4.0:
 				_place_flora(FloraS.make_palm(rng, rng.randf_range(0.85, 1.15)), p.x, p.y, rng.randf() * TAU)
 				break
 
@@ -486,7 +495,8 @@ func _ok_spot(p: Vector2, clear: float, min_town: float, min_lake: float) -> boo
 		return false
 	if p.distance_to(LAKE) < min_lake:
 		return false
-	if terrain.height_at(p.x, p.y) < 0.95:
+	# 水里不撒：跟水位比，别跟绝对高度比（见 terrain.BASE_LIFT）
+	if terrain.water_depth_at(p.x, p.y) > 0.0:
 		return false
 	for q in placed_pts:
 		if p.distance_to(q) < clear:
@@ -725,6 +735,9 @@ func _do_action(a: String) -> void:
 		"bag":
 			_toggle_bag()
 		"build":
+			# 水里不建：预览会浮在水面上，落位判定也过不去，直接不进这个模式
+			if not _can_act():
+				return
 			build_mode = not build_mode
 			if build_mode:
 				preview_dist = _find_good_preview_dist()
@@ -1024,7 +1037,17 @@ func _restore_hotbar_after_build() -> void:
 
 # ——————————————— 战斗 ———————————————
 ## 挥砍一次：判定前方扇形内最近的一只可狩猎动物
+## 水里能不能做采集/攻击/放置这类"手上活"
+## 【为什么直接禁掉而不是让它在水下也能用】玩家在水里是游泳姿态、双手在划水，
+## 挥斧头和挖树桩都不成立；而且水下还有动物贴着湖底走的话，
+## 允许攻击会变成"站在岸上隔水砍湖底的东西"这种更奇怪的画面。
+func _can_act() -> bool:
+	return player == null or not player.swimming
+
+
 func _attack() -> void:
+	if not _can_act():
+		return
 	var beast := _find_critter_in_arc(player.global_position, player.aim_dir(), false)
 	if beast == null:
 		# 没打到也要挥出去，否则触屏连点毫无反馈
@@ -1144,6 +1167,8 @@ func _nearest_resource() -> Node3D:
 
 
 func _harvest() -> void:
+	if not _can_act():
+		return
 	var n := _nearest_resource()
 	if n == null:
 		return
@@ -1248,9 +1273,11 @@ func _can_afford(cost: Dictionary) -> bool:
 func _place_ok(p: Vector3, r: float) -> bool:
 	if p.distance_to(player.global_position) > 15.0:
 		return false
-	if terrain.height_at(p.x, p.z) < 1.0:
+	# 水里不能放：用实际水深判定，覆盖整个水面（比原来的固定半径圆更贴合岸线）
+	if terrain.water_depth_at(p.x, p.z) > 0.15:
 		return false
-	if Vector2(p.x, p.z).distance_to(LAKE) < 27.0:
+	# 水面线以上再留一点干燥边距，别让建筑半只脚泡在水里
+	if p.y < terrain.water_level() + 0.25:
 		return false
 	for c in colliders:
 		if Vector2(p.x, p.z).distance_to(c.pos) < c.r + r + 0.6:
@@ -1301,7 +1328,12 @@ func _process(dt: float) -> void:
 		f.node.scale = Vector3(k, k * 1.1, k)
 		f.node.rotation.y += dt * 1.4
 
-	if not build_mode:
+	if not build_mode and player != null and player.swimming:
+		# 水里优先播报水域状态：这时采集/攻击/农事都不可用，显示那些只会误导
+		var tip := "下潜中" if player.diving else "游泳中"
+		hud.set_prompt("%s · 按住 %s 下潜　松开上浮" % [tip, _hint("[Ctrl]", "「潜」")])
+		hud.set_build("")
+	elif not build_mode:
 		var n := _nearest_resource()
 		var beast := _nearest_critter()
 		if n != null:
@@ -1345,6 +1377,8 @@ func _process(dt: float) -> void:
 			step_dist = 0.0
 			GameBus.player_step.emit(moved / maxf(dt, 0.0001), ppos)
 
+	_update_water_hud()
+
 	hud_timer -= dt
 	if hud_timer <= 0.0:
 		hud_timer = 0.2
@@ -1353,6 +1387,20 @@ func _process(dt: float) -> void:
 		hud.set_weapon("武器：" + player.weapon_name() + _hint("（Q 切换）", ""))
 		if season != null:
 			hud.set_season("%s · 第 %d 天 · %s" % [season.season_name, dn.day_count, _weather_cn(season.weather)])
+
+
+## 水域相关的 HUD 刷新。
+## 【为什么不能塞进 0.2 秒的 hud_timer】水下遮罩是"相机一入水就变色"，
+## 延迟 0.2 秒会看到明显的卡顿；憋气条也会一跳一跳。这两样必须每帧跟手。
+func _update_water_hud() -> void:
+	if hud == null or player == null:
+		return
+	hud.set_underwater(player.camera_underwater())
+	# 头入水时显示；出水后等气回满再收起来，免得条子在屏幕边缘一闪一闪
+	if player.head_underwater() or player.breath < 0.995:
+		hud.set_breath(player.breath)
+	else:
+		hud.set_breath(-1.0)
 
 
 func _weather_cn(w: String) -> String:

@@ -16,6 +16,8 @@ build/
 /touch_shots*/
 /menu_shots/
 /menu_shots*/
+/water_shots/
+/water_shots*/
 
 # 自检脚本落盘的日志（combat_check.gd / e2e.gd 等）
 /combat_check.log

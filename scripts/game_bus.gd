@@ -34,6 +34,7 @@ var touch_look := Vector2.ZERO  ## 本帧视角位移，由 player 消费后清�
 var touch_zoom := 0.0           ## 本帧缩放增量，正值拉远，消费后清零
 var touch_run := false          ## 摇杆推满即奔跑
 var touch_jump_edge := false    ## 跳跃边沿，由 player 消费后清零
+var touch_dive := false         ## 触控「潜」键的按住状态（不是边沿：要一直按着才往下）
 var build_mode := false         ## 建造模式镜像，由 main 同步；触控层据此决定拖动语义
 var ui_blocking := false        ## 有模态 UI（背包等）打开，触控层应停止处理世界输入
 
