@@ -15,6 +15,7 @@ const FarmS := preload("res://scripts/farm.gd")
 const SaveS := preload("res://scripts/save_system.gd")
 const TouchS := preload("res://scripts/touch_controls.gd")
 const WeaponsS := preload("res://scripts/weapons.gd")
+const InvUIS := preload("res://scripts/inventory_ui.gd")
 
 const TOWN := Vector2(-14.0, -10.0)
 const LAKE := Vector2(48.0, 22.0)
@@ -63,6 +64,7 @@ var farm: FarmSystem
 var save_sys: SaveSystem
 
 var inv := {"wood": 0, "stone": 0, "fiber": 0, "ore": 0, "food": 0}
+var inv_ui: InventoryUI
 var build_mode := false
 var build_index := 0
 var preview: Node3D = null
@@ -117,6 +119,12 @@ func _ready() -> void:
 	add_child(hud)
 	hud.set_resources(inv)
 	GameBus.toast.connect(Callable(hud, "toast"))
+
+	# —— 背包界面（默认隐藏，layer 30 盖住 HUD 与触控层）——
+	inv_ui = InvUIS.new()
+	add_child(inv_ui)
+	inv_ui.setup(_bag_inv, _bag_stat, _bag_equip)
+	inv_ui.closed.connect(_on_bag_closed)
 
 	# —— 音效（自己挂到 world 上）——
 	audio = AudioS.new()
@@ -198,8 +206,19 @@ func _setup_touch() -> void:
 
 ## 视口变化时 HUD 同步避让（首次挂载时 TouchControls 也会 emit 一次）
 func _on_touch_layout(w: float, h: float, k: float) -> void:
-	if hud != null:
-		hud.set_touch_mode(w, h, k)
+	if hud == null:
+		return
+	# 【为什么要单独算文字缩放】k = min(W/1440, H/810)，竖屏手机算出来只有 0.75，
+	# 再被触控层的 0.60 下限压住，HUD 文字就只剩 12px——分辨率完全够，字却看不清。
+	# 触控层的下限是为「按钮不能太小」设的，不该直接传导到字号上。
+	# 这里用短边独立判断"够不够读"，只在极端窄高比下生效，宽屏下就等于 k。
+	var k_text := maxf(k, clampf(minf(w, h) / 810.0, 0.0, 1.0))
+	# 反向告知触控层：HUD 会随 k_text 变大而下探，系统小钮必须让位。
+	# 这一步必须在 hud.set_touch_mode 之前，否则这一帧的让位是拿旧值算的。
+	var tc := get_node_or_null("TouchControls")
+	if tc != null and tc.has_method("set_text_scale"):
+		tc.set_text_scale(k_text)
+	hud.set_touch_mode(w, h, k, k_text)
 
 
 func _on_touch_action(a: String) -> void:
@@ -595,10 +614,21 @@ func _find_critter_at(pos: Vector3) -> Huntable:
 
 # ——————————————— 输入 ———————————————
 func _unhandled_input(event: InputEvent) -> void:
+	# 背包打开时只放行"关背包"和"再按一次背包键"，其余游戏输入一律吞掉。
+	# 否则会出现"点背包里的武器按钮 -> 同一帧鼠标左键也触发一次挥砍"。
+	if inv_ui != null and inv_ui.is_open():
+		if event is InputEventKey and event.pressed and not event.echo:
+			match event.keycode:
+				KEY_ESCAPE: _do_action("esc")
+				KEY_I, KEY_TAB: _do_action("bag")
+		return
+
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
 			KEY_E: _do_action("harvest")
 			KEY_B: _do_action("build")
+			KEY_I: _do_action("bag")
+			KEY_TAB: _do_action("bag")
 			# 数字键在建造模式下等价于直接放建筑，否则切武器。这样一套键位
 			# 在两种模式下都说得通，不用记两套。
 			KEY_1, KEY_2, KEY_3, KEY_4:
@@ -632,6 +662,8 @@ func _do_action(a: String) -> void:
 	match a:
 		"harvest":
 			_harvest()
+		"bag":
+			_toggle_bag()
 		"build":
 			build_mode = not build_mode
 			if build_mode:
@@ -674,6 +706,10 @@ func _do_action(a: String) -> void:
 				var on := not hud.help_label.visible
 				hud.show_help_panel(on)
 		"esc":
+			# Esc 是"退出当前这一层"：先关背包，再退建造模式
+			if inv_ui != null and inv_ui.is_open():
+				inv_ui.close()
+				return
 			_set_build_mode(false)
 			_restore_hotbar_after_build()
 			_refresh_preview()
@@ -771,6 +807,53 @@ func _set_build_mode(on: bool) -> void:
 	GameBus.build_mode = on
 
 
+# ——————————————— 背包界面 ———————————————
+func _toggle_bag() -> void:
+	if inv_ui == null:
+		return
+	# 进背包前先退建造模式：两者的"当前手持物"语义会打架
+	if not inv_ui.is_open() and build_mode:
+		_set_build_mode(false)
+		_refresh_preview()
+	inv_ui.toggle()
+	# 同步高亮到当前手持武器（可能刚被换过）
+	if inv_ui.is_open():
+		inv_ui.set_equipped(player.weapon_id())
+
+
+func _on_bag_closed() -> void:
+	# 关背包的同一帧可能有手指还按着，触控层要清一次残留状态
+	var tc := get_node_or_null("TouchControls")
+	if tc != null and tc.has_method("release_all"):
+		tc.release_all()
+
+
+## 背包数据源：资源计数（只读快照）
+func _bag_inv() -> Dictionary:
+	return inv
+
+
+## 背包数据源：底部统计行
+func _bag_stat() -> String:
+	var total := 0
+	for k in inv:
+		total += int(inv[k])
+	var alive := 0
+	for c in critters:
+		if is_instance_valid(c):
+			var h := c as Huntable
+			if h != null and not h.is_dead():
+				alive += 1
+	return "第 %d 天 · 资源合计 %d · 已建造 %d 座 · 已采集 %d 处 · 野外动物 %d 只" % [
+		dn.day_count, total, built_items.size(), harvested_ids.size(), alive]
+
+
+## 背包里点某把武器 -> 装备（与物品栏走同一套真值）
+func _bag_equip(id: String) -> void:
+	_equip_weapon(id)
+	hud.toast("已装备 " + player.weapon_name())
+
+
 ## 把 player 的当前武器同步到数据层，并刷新物品栏选中态
 func _equip_weapon(id: String) -> void:
 	var w: Dictionary = WeaponsS.find(id)
@@ -784,6 +867,13 @@ func _equip_weapon(id: String) -> void:
 	GameBus.tool_changed.emit(player.weapon_name())
 	hud.set_weapon("武器：" + player.weapon_name() + _hint("（Q 切换）", ""))
 	_sync_sel_to_weapon()
+	_sync_equipped_marks()
+
+
+## 武器换过之后，背包里那把的 ▶ 标记也要跟着走（背包没开时只记 id，开时顺带重绘）
+func _sync_equipped_marks() -> void:
+	if inv_ui != null:
+		inv_ui.set_equipped(player.weapon_id())
 
 
 ## 按当前手持武器反推应该高亮哪一格
@@ -801,6 +891,7 @@ func _cycle_held_weapon(dir: int) -> void:
 	player.cycle_weapon(dir)
 	hud.toast("武器：" + player.weapon_name())
 	_sync_sel_to_weapon()
+	_sync_equipped_marks()
 
 
 ## 进建造模式：把当前建筑临时塞到第 1 格并选中，用完 _restore_hotbar_after_build() 还原
@@ -1103,7 +1194,7 @@ func _process(dt: float) -> void:
 			var kind: String = n.get_meta("resource", "wood")
 			hud.set_prompt(_hint("[E] 采集 %s  ×%d", "点击采集 %s  ×%d") % [hud.RES_NAME[kind], int(n.get_meta("amount", 1))])
 		elif beast != null:
-			hud.set_prompt(_hint("[左键] 攻击 %s　[Q] 换武器", "点击攻击 %s　换武器") % beast)
+			hud.set_prompt(_hint("[左键] 攻击 %s　[Q] 换武器", "点击攻击 %s") % beast)
 		else:
 			hud.set_prompt("")
 		if farm != null:

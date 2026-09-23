@@ -35,6 +35,7 @@ var touch_zoom := 0.0           ## 本帧缩放增量，正值拉远，消费后
 var touch_run := false          ## 摇杆推满即奔跑
 var touch_jump_edge := false    ## 跳跃边沿，由 player 消费后清零
 var build_mode := false         ## 建造模式镜像，由 main 同步；触控层据此决定拖动语义
+var ui_blocking := false        ## 有模态 UI（背包等）打开，触控层应停止处理世界输入
 
 var modules := {}
 

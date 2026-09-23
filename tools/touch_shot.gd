@@ -93,6 +93,14 @@ func _ready() -> void:
 	if tc != null:
 		tc.reset_joy_position()
 
+	# —— 6) 背包界面：点「背包」按钮打开，layer=30 应盖住 HUD 与触控层 ——
+	m._do_action("bag")
+	await get_tree().create_timer(0.8).timeout
+	await RenderingServer.frame_post_draw
+	print("BAG open=%s blocking=%s" % [str(m.inv_ui.is_open()), str(GameBus.ui_blocking)])
+	get_viewport().get_texture().get_image().save_png(dir + "touch6_bag.png")
+	m._do_action("bag")
+
 	get_tree().quit()
 
 

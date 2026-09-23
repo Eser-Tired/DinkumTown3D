@@ -187,6 +187,71 @@ func _run() -> void:
 	_check_hotbar()
 	# —— 12) 轻点采集 / 攻击的扇形判定 ——（触控重构新增）
 	await _check_tap_arc()
+	# —— 13) 背包界面 ——（触控重构收尾）
+	_check_bag()
+
+
+## 背包：开关、内容刷新、装备联动、输入屏蔽
+func _check_bag() -> void:
+	if m.inv_ui == null:
+		_ok(false, "背包界面已创建")
+		return
+	_ok(true, "背包界面已创建")
+	_ok(not m.inv_ui.is_open(), "背包初始为关闭")
+
+	# 打开：应可见并屏蔽世界输入
+	m._do_action("bag")
+	_ok(m.inv_ui.is_open(), "按 bag 动作能打开背包")
+	_ok(GameBus.ui_blocking, "背包打开时标记 ui_blocking")
+
+	# 内容：资源数应与 inv 一致（先塞点东西确保不是全 0）
+	m.inv["wood"] = 7
+	m.inv_ui.refresh()
+	var txt := ""
+	for c in m.inv_ui._cells:
+		var lb: Label = c.label
+		if str(c.kind) == "wood":
+			txt = lb.text
+	_ok(txt.contains("7"), "背包资源格显示实时数量（实得 '%s'）" % txt.replace("\n", "/"))
+
+	# 统计行非空
+	var st: String = str(m._bag_stat())
+	_ok(st.length() > 8, "背包统计行非空")
+
+	# 装备联动：点第 2 把武器，player 应切过去
+	var W2 = load("res://scripts/weapons.gd")
+	if W2.count() >= 2:
+		var want_id: String = str(W2.get_at(1).get("id", ""))
+		m._bag_equip(want_id)
+		_eq(m.player.weapon_id(), want_id, "背包装备后 player 手持同步")
+		_eq(m.inv_ui._equipped_id, want_id, "背包记录当前装备 id")
+		# 装备后物品栏高亮也要跟着走（两套 UI 不能各说各话）
+		var found := false
+		for i in m.hotbar.size():
+			var s: Dictionary = m.hotbar[i]
+			if str(s.get("kind", "")) == "weapon" and str(s.get("id", "")) == want_id:
+				found = (m.hotbar_sel == i)
+				break
+		_ok(found, "背包装备后底栏高亮同步")
+
+	# 关闭：应还原输入屏蔽
+	m._do_action("bag")
+	_ok(not m.inv_ui.is_open(), "再按一次能关闭背包")
+	_ok(not GameBus.ui_blocking, "关闭后解除 ui_blocking")
+
+	# Esc 关背包
+	m._do_action("bag")
+	_ok(m.inv_ui.is_open(), "重新打开用于 Esc 测试")
+	m._do_action("esc")
+	_ok(not m.inv_ui.is_open(), "Esc 能关闭背包")
+	_ok(not GameBus.ui_blocking, "Esc 关闭后解除 ui_blocking")
+
+	# 进背包应自动退建造模式
+	m._set_build_mode(true)
+	m._do_action("bag")
+	_ok(m.inv_ui.is_open() and not m.build_mode, "进背包自动退出建造模式")
+	m._do_action("bag")
+	_ok(not m.inv_ui.is_open(), "收尾关闭背包")
 
 
 ## 物品栏：格子数、类型、选中与 player.weapon_idx 的一致性

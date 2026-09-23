@@ -20,8 +20,11 @@ func _ready() -> void:
 	add_child(hud)
 	var tc: CanvasLayer = load("res://scripts/touch_controls.gd").new()
 	# 与真实顺序一致：先连接再挂载（TouchControls._ready 会发出首次布局事件）
+	# 与 main._on_touch_layout 保持同一套算法，否则自检用的是和线上不同的布局
 	GameBus.touch_layout_changed.connect(func(w: float, h: float, k: float):
-		hud.set_touch_mode(w, h, k))
+		var k_text := maxf(k, clampf(minf(w, h) / 810.0, 0.0, 1.0))
+		tc.set_text_scale(k_text)
+		hud.set_touch_mode(w, h, k, k_text))
 	add_child(tc)
 
 	await get_tree().process_frame

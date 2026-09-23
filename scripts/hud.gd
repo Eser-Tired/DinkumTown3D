@@ -109,7 +109,7 @@ func _build() -> void:
 	add_child(help_panel)
 	help_label = _label(16, Vector2(34, 650), 540)
 	help_label.size = Vector2(540, 140)
-	help_label.text = "WASD/方向键 移动 · Shift 奔跑 · 空格 跳跃\n鼠标右键拖拽 转视角 · 滚轮 缩放\nE 采集 · 左键 攻击 · Q 换武器 · 1-4 切物品栏\nB 建造模式 · 建造中 1-4 选建筑 · 左键放置\nF 农事 · G 换作物 · T 加速时间 · H 隐藏帮助\nF2 保存 · F3 读取 · M 静音"
+	help_label.text = "WASD/方向键 移动 · Shift 奔跑 · 空格 跳跃\n鼠标右键拖拽 转视角 · 滚轮 缩放\nE 采集 · 左键 攻击 · Q 换武器 · 1-4 切物品栏\nB 建造模式 · 建造中 1-4 选建筑 · 左键放置\nI 背包 · F 农事 · G 换作物 · T 加速时间 · H 隐藏帮助\nF2 保存 · F3 读取 · M 静音 · Esc 关闭当前面板"
 	add_child(help_label)
 
 	# 浮动提示
@@ -125,7 +125,11 @@ func _build() -> void:
 ## 【关键约束】桌面的"右侧竖列"是按 1440 宽写死的像素坐标（x=1150），
 ## 在别的分辨率下会跑到屏幕外或者压住触控按钮。所以这里必须把整列
 ## 按 k 重新贴到右上角，并且只占顶部这一条，把 y > 200k 全让出来。
-func set_touch_mode(w: float, h: float, k: float) -> void:
+## k      —— 几何缩放（面板尺寸、坐标），跟随触控层保持一致
+## k_text —— 文字缩放，主调方会给一个不低于 k 的下界，防止竖屏下字小到读不了
+func set_touch_mode(w: float, h: float, k: float, k_text: float = -1.0) -> void:
+	if k_text < 0.0:
+		k_text = k
 	help_label.text = (
 		"左下摇杆移动，推满自动奔跑（长按可拖动重新定位）\n"
 		+ "屏幕空白处拖动转视角，双指捏合缩放\n"
@@ -133,6 +137,7 @@ func set_touch_mode(w: float, h: float, k: float) -> void:
 		+ "底栏 4 格：点一下切换武器或建筑\n"
 		+ "右侧：使用（攻击/放置）· 跳 · 农事 · 旋转\n"
 		+ "左上：背包 · 建造　　右上：存 / 读 / 加速 / 静音"
+		+ "\n背包里可点武器直接装备，再点背包键或 Esc 关闭"
 	)
 	show_help_panel(false)
 
@@ -145,38 +150,56 @@ func set_touch_mode(w: float, h: float, k: float) -> void:
 	const PAD_X := 18.0
 	const PANEL_W := 226.0
 	const GAP := 6.0
+	# 【kt = 文字缩放，k = 几何缩放】几何可以缩得很小（留出操作空间），
+	# 但文字小于 ~14px 就没法读了。所以面板尺寸/坐标用 kt，字号用 kt ≥ k。
+	var kt := k_text
+	# 【为什么宽度用 k 而不是 kt】右侧竖列的上方是触控层从 210k 起的两排系统小钮。
+	# 竖屏下 kt（短边/810 = 1.33）远大于 k（0.75），用 kt 算宽度会让面板变胖、
+	# 面板高度跟着 kt 走，整列下探到 210k 以下把系统小钮压住。
+	# 宽度保持 k 锚定右边缘不会漂；只有字号用 kt，所以窄面板里字会更宽——
+	# 但竖屏下文字是短的（"第1天 07:31"），实测放得下。
 	var pw := PANEL_W * k
 	var px := w - PAD_X * k - pw
 	var sizes := [62.0, 40.0, 40.0]
 	var labs := [clock_label, season_label, weapon_label]
-	var cy := PAD_TOP * k
+	var cy := PAD_TOP * kt
 	for i in _right_panels.size():
 		var p: Panel = _right_panels[i]
 		p.position = Vector2(px, cy)
-		p.size = Vector2(pw, sizes[i] * k)
+		# 面板高 = 几何高 + 字号增量，保证字号涨上去后文字不会顶出面板
+		var ph := maxf(sizes[i] * k, sizes[i] * kt - 6.0 * kt)
+		p.size = Vector2(pw, ph)
 		var l: Label = labs[i]
-		l.position = Vector2(px + 16.0 * k, cy + 12.0 * k)
-		l.size = Vector2(pw - 32.0 * k, sizes[i] * k)
-		l.add_theme_font_size_override("font_size", maxi(11, int((20 if i == 0 else 17) * k)))
-		cy += (sizes[i] + GAP) * k
+		l.position = Vector2(px + 12.0 * k, cy + 6.0 * k)
+		l.size = Vector2(pw - 24.0 * k, ph - 10.0 * k)
+		l.add_theme_font_size_override("font_size", maxi(13, int((20 if i == 0 else 17) * kt)))
+		cy += ph + GAP * k
 
-	# —— 资源栏：按 k 缩放，贴左上。高度必须放得下 5 行 ——
-	# 字号 19k，Label 默认行高约 1.35 倍，5 行 ≈ 128k；再加 20k 上下边距。
-	var rh := 150.0 * k
-	res_panel.position = Vector2(18.0 * k, 16.0 * k)
-	res_panel.size = Vector2(250.0 * k, rh)
-	res_label.position = Vector2(34.0 * k, 26.0 * k)
-	res_label.size = Vector2(230.0 * k, rh - 20.0 * k)
-	res_label.add_theme_font_size_override("font_size", maxi(12, int(19.0 * k)))
+	# —— 资源栏：按 kt 缩放，贴左上。高度必须放得下 5 行 ——
+	# 字号 19kt，Label 默认行高约 1.35 倍，5 行 ≈ 128kt；再加 20kt 上下边距。
+	var rh := 150.0 * kt
+	res_panel.position = Vector2(18.0 * kt, 16.0 * kt)
+	res_panel.size = Vector2(250.0 * kt, rh)
+	res_label.position = Vector2(34.0 * kt, 26.0 * kt)
+	res_label.size = Vector2(230.0 * kt, rh - 20.0 * kt)
+	res_label.add_theme_font_size_override("font_size", maxi(13, int(19.0 * kt)))
 
 	# —— 提示与建造菜单 ——
-	# 建造菜单放在资源栏正下方，两者间距 10k，绝不重叠。
-	prompt_label.position = Vector2(w * 0.5 - 280.0 * k, h - 175.0 * k)
-	prompt_label.size = Vector2(560.0 * k, 56.0 * k)
-	var by := 16.0 * k + rh + 12.0 * k
-	build_label.position = Vector2(18.0 * k, by)
-	build_label.size = Vector2(330.0 * k, 170.0 * k)
-	build_label.add_theme_font_size_override("font_size", maxi(11, int(18.0 * k)))
+	# 【为什么要抬到 232k】触控模式下底部物品栏顶边在 h-106k，格子高 88k；
+	# 提示行高 56k 落在 h-175k 时正好把第 3/4 格盖住（竖屏下实测）。
+	# 232k = 106k + 88k + 38k，留够间隔，同时仍在半屏以下不挡视野。
+	# 宽度用 560k（不是 kt）：右侧「跳 / 农事 / 使用」竖列在竖屏下会横向侵入，
+	# 用 kt 算宽度会把提示行撑到按钮底下。文字仍用 kt，靠水平居中和面板留白兜住。
+	prompt_label.position = Vector2(w * 0.5 - 280.0 * k, h - 232.0 * k)
+	prompt_label.size = Vector2(560.0 * k, 56.0 * kt)
+	prompt_label.add_theme_font_size_override("font_size", maxi(13, int(20.0 * kt)))
+	var by := 16.0 * kt + rh + 12.0 * k
+	# 【为什么这里要 330k 而不是 330kt】菜单从左上角起，向右展开；
+	# 竖屏下 kt=1.33 会把宽度撑到 440，直接钻进右上系统小钮的地盘。
+	# 用 k 算宽度（竖屏 810 宽 -> 247px）刚好卡在小钮左侧。
+	build_label.position = Vector2(18.0 * kt, by)
+	build_label.size = Vector2(330.0 * k, 170.0 * kt)
+	build_label.add_theme_font_size_override("font_size", maxi(12, int(18.0 * kt)))
 	build_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 
 

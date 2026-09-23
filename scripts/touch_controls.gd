@@ -50,6 +50,13 @@ var _btn_rects: Array = []
 var _k := 1.0
 var _vs := REF
 
+## HUD 右侧竖列（时钟/季节/武器）在"文字缩放"下的底边，单位是与 k 同一基准的系数。
+## 【为什么要跨文件同步这个数】竖屏下 HUD 用的是比 k 大的 k_text 来放大字号，
+## 竖列会随之下探；系统小钮必须让开。这个常量是 hud.set_touch_mode() 的产物，
+## 改 HUD 那边必须同步改这里，否则竖屏会被压住（有 touch_layout_check 兜底）。
+const HUD_COL_BOTTOM := 218.0
+var _k_text_geo := 1.0
+
 ## 快捷物品栏格子状态（由 main 通过 set_hotbar() 同步）
 var _hotbar: Array = []
 var _hotbar_sel := 0
@@ -105,6 +112,15 @@ func reset_joy_position() -> void:
 	_rebuild()
 
 
+## 由 main 告知 HUD 实际使用的"文字缩放"（可能大于 k），系统小钮据此让位。
+## 必须在首次 _rebuild 之前调用，否则第一次布局会按默认值算、瞬间压住 HUD。
+func set_text_scale(k_text: float) -> void:
+	if is_equal_approx(k_text, _k_text_geo):
+		return
+	_k_text_geo = k_text
+	_rebuild()
+
+
 # ——————————————— 布局（锚点式） ———————————————
 ## 规则：尺寸与偏移一律按 k 缩放；位置由「贴哪条边」决定。
 ## 这样无论宽高比怎么变，元素只会随边缘移动，不会互相漂移。
@@ -157,12 +173,16 @@ func _rebuild() -> void:
 	_refresh_hotbar()
 
 	# —— 右上：系统小钮 ——
-	# 【跨文件约定】HUD 右侧竖列（时钟/季节/武器）在触控模式下占到 y ≈ 182k，
-	# 所以这里从 SYS_ROW1 = 210k 起，绝不上探。改这边要同步看 hud.set_touch_mode()。
-	# 两行：210k / 268k，下排底边 268k+26k = 294k；
-	# 「旋转」放 350k，与系统钮留出 30k 以上间隙。
-	var SYS_ROW1 := 210.0
-	var SYS_ROW2 := 268.0
+	# 【跨文件约定】HUD 右侧竖列（时钟/季节/武器）在触控模式下占到 y ≈ 218k，
+	# 所以这里从 SYS_ROW1 = 248k 起，绝不上探。改这边要同步看 hud.set_touch_mode()。
+	# 竖屏（1080x2340）实测 HUD 竖列底边 = 218.4px，248k=186 太挤，
+	# 所以再叠一个"至少让过 HUD 实际底边"的兜底：按下发的 k_text 反推。
+	# 两行：248k / 306k，下排底边 306k+26k = 332k；
+	# 「旋转」放 388k，与系统钮留出 30k 以上间隙。
+	var sys_y1 := maxf(248.0 * k, HUD_COL_BOTTOM * _k_text_geo)
+	var sys_y2 := sys_y1 + 58.0 * k
+	var SYS_ROW1 := sys_y1 / k
+	var SYS_ROW2 := sys_y2 / k
 	_make_sys_button("存", "save", W - 200.0 * k, SYS_ROW1 * k, 84.0 * k, 52.0 * k)
 	_make_sys_button("读", "load", W - 108.0 * k, SYS_ROW1 * k, 84.0 * k, 52.0 * k)
 	_make_sys_button("加速", "time", W - 200.0 * k, SYS_ROW2 * k, 84.0 * k, 52.0 * k)
@@ -174,8 +194,9 @@ func _rebuild() -> void:
 	_btn_at("跳", "jump", W - 264.0 * k, H - 246.0 * k, 108.0 * k, 108.0 * k, 21)
 	_btn_at("农事", "farm", W - 300.0 * k, H - 112.0 * k, 104.0 * k, 104.0 * k, 19)
 	# 建造模式专用：旋转 / 放置。放在系统钮下方，与 HUD 竖列彻底分离。
-	_btn_at("旋转", "rotate", W - 128.0 * k, 350.0 * k, 118.0 * k, 58.0 * k, 19)
-	_btn_at("放置", "place", W - 128.0 * k, 416.0 * k, 118.0 * k, 58.0 * k, 19)
+	var rot_y := sys_y2 + 82.0 * k
+	_btn_at("旋转", "rotate", W - 128.0 * k, rot_y, 118.0 * k, 58.0 * k, 19)
+	_btn_at("放置", "place", W - 128.0 * k, rot_y + 66.0 * k, 118.0 * k, 58.0 * k, 19)
 
 	GameBus.touch_layout_changed.emit(W, H, k)
 
@@ -274,10 +295,33 @@ func _in_button(p: Vector2) -> bool:
 
 
 func _input(event: InputEvent) -> void:
+	# 模态 UI（背包）打开时整层停止响应。
+	# 【为什么必须显式判断】_input 在 GUI 处理【之前】触发，所以背包的全屏遮罩
+	# 挡不住这里——不判断的话，点背包里的武器按钮会同时推摇杆、抬手还发出
+	# touch_tap，导致关背包的同一帧又去采集/攻击一次。
+	if GameBus.ui_blocking:
+		return
 	if event is InputEventScreenTouch:
 		_on_touch(event.index, event.position, event.pressed)
 	elif event is InputEventScreenDrag:
 		_on_drag(event.index, event.position, event.relative)
+
+
+## 外部（背包等）接管输入时调用：清掉所有在途手指状态，
+## 否则会出现"按下时没被屏蔽、抬起时被屏蔽"导致摇杆卡住推到底的残留。
+func release_all() -> void:
+	_joy_id = -1
+	_dragging_joy = false
+	_joy_press_t = 0.0
+	_tap_id = -1
+	_active.clear()
+	_pinch_prev = 0.0
+	_joy.set_knob(Vector2.ZERO)
+	_joy.set_drag_hint(false)
+	GameBus.touch_move = Vector2.ZERO
+	GameBus.touch_look = Vector2.ZERO
+	GameBus.touch_zoom = 0.0
+	GameBus.touch_run = false
 
 
 func _on_touch(idx: int, pos: Vector2, pressed: bool) -> void:
