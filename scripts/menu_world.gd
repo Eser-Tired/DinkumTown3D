@@ -24,7 +24,9 @@ const ORBIT_H := 20.0
 ## 环绕角速度（弧度/秒），一整圈约 72 秒
 const ORBIT_W := 0.087
 ## 注视点：小镇中心。相机从这个点向外绕，所以小镇始终在画面正中。
-const LOOK_AT := Vector3(-14.0, 2.6, -10.0)
+## y 在 _ready 里按实际地形高度补——地形基准高度调整过一次，
+## 写死的 2.6 会变成"看向地面以下"，画面里只剩一片草皮。
+var look_target := Vector3(-14.0, 2.6, -10.0)
 
 var terrain: Node3D
 var dn: DayNight
@@ -33,15 +35,25 @@ var cam: Camera3D
 var _angle := 0.0
 var _shake := 0.0
 
+## 背景世界的地图种子。<= 0 表示"本次启动随机"。
+## 背景每次都换一张图：它展示的正是"这个游戏的地图是随机生成的"。
+## 和进游戏后那张图没有关系——那边由 main 单独掷种子。
+var menu_seed := 0
+
 
 func _ready() -> void:
-	# 固定种子：保证每次进主界面看到的都是同一个小镇（视觉稳定）
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 20260921
+	if menu_seed <= 0:
+		rng.randomize()
+		menu_seed = rng.randi_range(1, 2147483000)
 
 	terrain = TerrainS.new()
 	terrain.name = "MenuTerrain"
+	terrain.set_map_seed(menu_seed)
 	add_child(terrain)
+
+	# 注视点落在小镇地面之上：高度必须问地形，不能写死
+	look_target = Vector3(TOWN.x, float(terrain.height_at(TOWN.x, TOWN.y)) + 0.8, TOWN.y)
 
 	# 只铺植被与少量建筑剪影，不铺可采集物（没有玩家去采）
 	_scatter_decor()
@@ -76,7 +88,8 @@ func _ready() -> void:
 
 func _scatter_decor() -> void:
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 20260921
+	# 跟地形同一个种子（加盐区分流），植被分布才能和这张地图对上
+	rng.seed = menu_seed + 991
 
 	# —— 植被（密度接近游戏内，让菜单画面够饱满）——
 	_flora_pass(rng, 62, 28.0, 30.0, 4.0, "eucalyptus")
@@ -165,12 +178,12 @@ func _update_cam(dt: float) -> void:
 	_shake += dt
 	var h := ORBIT_H + sin(_shake * 0.31) * 1.4
 	var pos := Vector3(
-		LOOK_AT.x + cos(_angle) * ORBIT_R,
+		look_target.x + cos(_angle) * ORBIT_R,
 		h,
-		LOOK_AT.z + sin(_angle) * ORBIT_R
+		look_target.z + sin(_angle) * ORBIT_R
 	)
 	cam.position = pos
-	cam.look_at(LOOK_AT + Vector3(0.0, 0.6, 0.0), Vector3.UP)
+	cam.look_at(look_target + Vector3(0.0, 0.6, 0.0), Vector3.UP)
 
 
 func _process(dt: float) -> void:

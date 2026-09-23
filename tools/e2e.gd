@@ -9,6 +9,9 @@ var fails := 0
 func _ready() -> void:
 	var MS = load("res://scripts/main.gd")
 	m = MS.new()
+	# 固定地图种子：本脚本里全是写死的期望值（资源数、坐标、存档往返比对），
+	# 地图一随机就变成碰运气。要测的是"存读档是否等价"，不是"随机是否好看"。
+	m.forced_map_seed = 20260921
 	add_child(m)
 	for i in 8:
 		await get_tree().process_frame

@@ -52,6 +52,16 @@ var dn: DayNight
 var hud: GameHUD
 var rng := RandomNumberGenerator.new()
 
+## 这一局的地图种子：地形起伏 / 河道走向 / 植被分布全由它派生。
+## 新游戏时随机掷，读档时从存档 __meta 里取回——所以同一个存档永远回到同一张地图。
+var map_seed := 20260921
+
+## 非 0 时强制使用该种子，忽略"新游戏随机掷"。
+## 【为什么需要它】地图一随机，自检脚本里那些固定期望值（资源数量、坐标、
+## 存档往返比对）就全成了碰运气。测试要的是可复现，所以留一个外部指定种子的口子。
+## 必须在 add_child 之前设置。
+var forced_map_seed := 0
+
 var colliders: Array = []      # {node, pos:Vector2, r:float}
 var resources: Array = []      # 可采集节点
 var spins: Array = []
@@ -94,10 +104,13 @@ var critters: Array = []
 
 
 func _ready() -> void:
-	rng.seed = 20260921
+	_resolve_map_seed()
 
 	terrain = TerrainS.new()
 	terrain.name = "Terrain"
+	# 种子必须赶在 add_child 之前给：_ready() 里就会用它生成噪声与河道，
+	# 挂进树之后再改，地面网格早就按旧种子烘好了。
+	terrain.set_map_seed(map_seed)
 	add_child(terrain)
 
 	_build_town()
@@ -175,6 +188,40 @@ func _ready() -> void:
 	_setup_touch()
 	_consume_pending_load()
 	_check_auto_shot()
+
+
+## 决定这一局用哪张地图。
+## 【为什么要在建世界之前单独跑一趟】地形是程序化生成的，只有种子是"来自过去"的信息；
+## 而 main 模块的存档数据要等 save_sys.load() 里反序列化，那时地形早就烘好了。
+## 所以种子走 __meta 这条能提前读的通道。
+func _resolve_map_seed() -> void:
+	var slot: int = GameBus.pending_load_slot if GameBus != null else -1
+	if forced_map_seed != 0:
+		# 自检脚本指定了种子：一律照办，保证每次跑出来是同一张图
+		map_seed = forced_map_seed
+	elif slot >= 0:
+		var s: int = SaveS.peek_terrain_seed(slot)
+		if s >= 0:
+			map_seed = s
+		else:
+			# 旧存档没记种子：退回一个固定值，至少保证"同一个旧档每次都开出同一张图"，
+			# 而不是每次读档都换一片大陆。
+			map_seed = 20260921
+	else:
+		map_seed = _roll_map_seed()
+	if GameBus != null:
+		GameBus.terrain_seed = map_seed
+	# 世界内容（植被、石头、动物的随机分布）跟着同一个种子走，
+	# 否则读档后树会长到别的地方去。
+	rng.seed = map_seed
+
+
+## 掷一个地图种子。上限压在 int32 以内：这个数字要进存档 JSON，
+## 太大可能被写成科学计数法，读回来就对不上了。
+func _roll_map_seed() -> int:
+	var r := RandomNumberGenerator.new()
+	r.randomize()
+	return r.randi_range(1, 2147483000)
 
 
 ## 消费主界面写下的握手值：决定这一局是新游戏还是读档

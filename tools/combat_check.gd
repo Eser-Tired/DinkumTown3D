@@ -23,6 +23,9 @@ func _ready() -> void:
 		get_tree().quit(2)
 		return
 	m = MS.new()
+	# 固定地图种子：本脚本里有写死的期望值（动物数量、坐标、物品栏内容），
+	# 地图随机化之后不固定种子就成了碰运气。
+	m.forced_map_seed = 20260921
 	add_child(m)
 	for i in 10:
 		await get_tree().process_frame

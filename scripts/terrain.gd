@@ -30,10 +30,36 @@ const WATER_Y := 0.0
 ## 湖心最深处的参考深度（米），只用来把水深归一化给 shader 上色
 const DEEP_REF := 5.6
 
+## —— 河流 ——
+## 河道半宽（米）。整条河宽 2*RIVER_W = 14 米。
+const RIVER_W := 7.0
+## 河岸过渡带宽度：从"水面以下"平滑抬到原地形，形成河谷
+const RIVER_BANK := 13.0
+## 河床最低点（米）。负值 = 水面以下
+const RIVER_BED_Y := -2.6
+## 河道边缘的水深。必须 > 0：这是"河流不断流"的底线——
+## 河道内任何一点的地面都被 min() 削到这个高度以下，所以一定有水。
+const RIVER_EDGE_Y := WATER_Y - 0.30
+## 河道路径的折线段数。段数越多河道越顺，但 height_at 每次都要扫一遍，
+## 而 height_at 在生成地形时会调用几万次，所以这里要克制。
+const RIVER_SEGS := 20
+
+## 地图种子 —— 整张地图由它派生（起伏 / 河流走向 / 植被分布）。
+## 【为什么必须存在】存档只需要记住这一个整数，就能在任何时候重建出同一张地图；
+## 反过来，同一个种子必须是同一张图，否则读档会回到另一片大陆。
+var map_seed := 20260921
+
+## 河道路径（折线顶点，世界 XZ 坐标）
+var river_pts: PackedVector2Array = PackedVector2Array()
+## 路径的粗包围盒（含河宽余量）。river_dist 先拿它做快速剔除——
+## 地图上大部分点离河很远，没必要逐段算距离。
+var _river_box := Rect2()
+
 var n_base: FastNoiseLite
 var n_detail: FastNoiseLite
 var n_tint: FastNoiseLite
 var water_mat: ShaderMaterial
+var water_mi: MeshInstance3D
 
 # —— 季节染色 ——
 var ground_mi: MeshInstance3D
@@ -43,23 +69,48 @@ var season_amt := 0.0
 
 
 func _ready() -> void:
+	_init_noise()
+	ground_mi = _build_ground()
+	add_child(ground_mi)
+	water_mi = _build_water()
+	add_child(water_mi)
+
+
+## 三个噪声层各自用「地图种子 + 一个固定盐值」派生，互不相关又都确定。
+## 加盐值是为了避免三层噪声的图案相互叠加出可见的重复纹理。
+func _init_noise() -> void:
 	n_base = FastNoiseLite.new()
-	n_base.seed = 20260921
+	n_base.seed = map_seed
 	n_base.frequency = 0.0072
 	n_base.fractal_octaves = 3
 
 	n_detail = FastNoiseLite.new()
-	n_detail.seed = 5150
+	n_detail.seed = map_seed + 5150
 	n_detail.frequency = 0.042
 	n_detail.fractal_octaves = 2
 
 	n_tint = FastNoiseLite.new()
-	n_tint.seed = 31415
+	n_tint.seed = map_seed + 31415
 	n_tint.frequency = 0.02
 
-	ground_mi = _build_ground()
-	add_child(ground_mi)
-	add_child(_build_water())
+	_build_river_path()
+
+
+## 换一张地图。
+## 【为什么必须在 add_child 之前调用】它会重算噪声与河道，然后重建地面与水面网格；
+## 已经挂进场景树之后再换，场上那些按 height_at 摆好的树、石头、动物不会跟着动。
+func set_map_seed(s: int) -> void:
+	if s == map_seed and not river_pts.is_empty():
+		return
+	map_seed = s
+	_init_noise()
+	if ground_mi != null:
+		ground_mi.mesh = _ground_mesh()
+	if water_mi != null:
+		water_mi.queue_free()
+		water_mi = null
+		water_mi = _build_water()
+		add_child(water_mi)
 
 
 ## 季节系统回调：换季时重算顶点色并刷新可染色材质
@@ -80,6 +131,91 @@ func register_tintable(m: Material) -> void:
 		m.set("albedo_color", Color(1.0, 1.0, 1.0).lerp(season_tint, season_amt * 0.65))
 
 
+# ——————————————— 河道路径 ———————————————
+## 生成河道中心线。
+## 【设计约束】上游必须从"远离小镇的那半边"进图——河穿过小镇会把镇子切成两半，
+## 而游戏里没有桥的机制。所以起点方位以「湖指向小镇的反方向」为中心，只在那附近抖动。
+func _build_river_path() -> void:
+	# 河道形状单独派生一条随机流，不和噪声种子混用，
+	# 这样"改河道"和"改地形起伏"互不牵连，调一个不会把另一个搅乱。
+	var rng := RandomNumberGenerator.new()
+	rng.seed = map_seed * 7919 + 13
+
+	# 起点落在地图的南边缘或东边缘（种子决定哪一边 + 具体位置）。
+	# 【为什么不是"从湖向远离小镇的方向射出去"】湖本身偏东南，那个方向离地图边界
+	# 只有 80 米出头，河短得像湖的一条尾巴。而南边与东边的边缘同样远离小镇，
+	# 又能给出 100 米以上的河道，形状才像一条河。
+	var edge := HALF - 6.0
+	var start: Vector2
+	if rng.randf() < 0.5:
+		start = Vector2(rng.randf_range(-44.0, 116.0), edge)   # 南边缘
+	else:
+		start = Vector2(edge, rng.randf_range(-56.0, 116.0))   # 东边缘
+
+	var to_lake := LAKE_C - start
+	var span := to_lake.length()
+	var dir := to_lake / span
+	var perp := Vector2(-dir.y, dir.x)
+
+	var c1 := start + dir * (span * 0.66) + perp * rng.randf_range(-30.0, 30.0)
+	var c2 := start + dir * (span * 0.33) + perp * rng.randf_range(-26.0, 26.0)
+
+	# Catmull-Rom 采样成折线：首尾各加一个镜像虚拟点，让曲线真正穿过两个端点
+	var ctrl: Array = [
+		start + (start - c1) * 0.5, start, c1, c2, LAKE_C, LAKE_C + (LAKE_C - c2) * 0.5
+	]
+	river_pts = PackedVector2Array()
+	for i in range(RIVER_SEGS + 1):
+		var t := float(i) / float(RIVER_SEGS) * float(ctrl.size() - 3)
+		var seg := clampi(int(floor(t)), 0, ctrl.size() - 4)
+		river_pts.append(_catmull(ctrl[seg], ctrl[seg + 1], ctrl[seg + 2], ctrl[seg + 3],
+			t - float(seg)))
+
+	# 粗包围盒（含河宽与河岸余量）。river_dist 靠它一步剔除地图上大部分点。
+	var mn := river_pts[0]
+	var mx := river_pts[0]
+	for p in river_pts:
+		mn.x = minf(mn.x, p.x)
+		mn.y = minf(mn.y, p.y)
+		mx.x = maxf(mx.x, p.x)
+		mx.y = maxf(mx.y, p.y)
+	var pad := RIVER_W + RIVER_BANK + 2.0
+	_river_box = Rect2(mn - Vector2(pad, pad), (mx - mn) + Vector2(pad * 2.0, pad * 2.0))
+
+
+func _catmull(p0: Vector2, p1: Vector2, p2: Vector2, p3: Vector2, t: float) -> Vector2:
+	var t2 := t * t
+	var t3 := t2 * t
+	return 0.5 * ((2.0 * p1) + (-p0 + p2) * t
+		+ (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+		+ (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3)
+
+
+## 点到河道中心线的最短距离（米）。超出影响范围时返回一个很大的值。
+func river_dist(x: float, z: float) -> float:
+	if river_pts.size() < 2:
+		return 1e9
+	var p := Vector2(x, z)
+	# 粗剔除放在最前面：地图上大部分点离河很远，逐段算距离是纯浪费，
+	# 而 height_at 在生成地形时会被调用几万次，这里的常数很值钱。
+	if not _river_box.has_point(p):
+		return 1e9
+	var best := 1e9
+	for i in river_pts.size() - 1:
+		var d := _point_seg_dist(p, river_pts[i], river_pts[i + 1])
+		if d < best:
+			best = d
+	return best
+
+
+func _point_seg_dist(p: Vector2, a: Vector2, b: Vector2) -> float:
+	var ab := b - a
+	var l2 := ab.length_squared()
+	if l2 < 1e-6:
+		return p.distance_to(a)
+	return p.distance_to(a + ab * clampf((p - a).dot(ab) / l2, 0.0, 1.0))
+
+
 ## 任意点的地面高度 —— 地形、玩家、道具、动物共用
 func height_at(x: float, z: float) -> float:
 	var h := n_base.get_noise_2d(x, z) * AMP_BASE
@@ -96,6 +232,19 @@ func height_at(x: float, z: float) -> float:
 		# 到 t=1 仍然精确归 1，保证 d = LAKE_R+SHORE 处与湖外公式无缝衔接。
 		h *= lerpf(0.10, 1.0, t * t)
 		h += lerpf(-5.6, 0.0, t * t)
+
+	# 河流：把河道削到水面以下，再向两侧平滑抬回原地形，形成河谷。
+	# 【为什么是 min 而不是"减去一个下凹量"】减法会被高地形顶回去——河一经过
+	# 高地就断成两截。min 强制河道任何一点都低于水位，这就是"河流覆盖稳定"的
+	# 全部来源：不管随机地形长成什么样，河永远有水。
+	var rd := river_dist(x, z)
+	if rd < RIVER_W + RIVER_BANK:
+		if rd < RIVER_W:
+			var k := rd / RIVER_W
+			h = minf(h, lerpf(RIVER_BED_Y, RIVER_EDGE_Y, k * k))
+		else:
+			var t3 := (rd - RIVER_W) / RIVER_BANK
+			h = lerpf(minf(h, RIVER_EDGE_Y), h, t3 * t3)
 
 	# 小镇：中心压平，方便摆建筑
 	var td := Vector2(x, z).distance_to(TOWN_CENTER)
@@ -114,17 +263,19 @@ func water_level() -> float:
 	return WATER_Y
 
 
-## 该点是否属于水体范围（当前只有湖区；将来加河道就在这里并集）
+## 该点是否属于水体范围（湖 + 河）
 func in_water(x: float, z: float) -> bool:
-	return Vector2(x, z).distance_to(LAKE_C) < LAKE_R + SHORE
+	if Vector2(x, z).distance_to(LAKE_C) < LAKE_R + SHORE:
+		return true
+	return river_dist(x, z) < RIVER_W + RIVER_BANK
 
 
-## 水深（米）。0 表示这里没有水。
+## 水深（米）。0 表示这里没有水。湖与河流共用这一个入口。
 ## 【为什么要有这个函数】玩家游泳/潜水、建造避水、撒点避水全都需要它，
 ## 各自去写 `height_at < 0.9` 这种魔法阈值迟早会各说各话。
+## 【为什么不先用 in_water 短路】height_at 只有在水体范围内才会低于水位，
+## 结果天然正确；而 in_water 自己也要扫一遍河道，前置判断等于白算两遍。
 func water_depth_at(x: float, z: float) -> float:
-	if not in_water(x, z):
-		return 0.0
 	return maxf(0.0, WATER_Y - height_at(x, z))
 
 
@@ -251,12 +402,21 @@ func _ground_mesh() -> ArrayMesh:
 ## 水陆交界精确吻合。
 func _build_water() -> MeshInstance3D:
 	var step := SIZE / float(GRID)
-	# 只扫湖区包围盒（将来加河道时，这里换成各水体包围盒的并集）
+	# 扫描范围 = 湖的包围盒 ∪ 河流的包围盒。河可能横跨半张地图，所以这个并集
+	# 会明显变大；但 _quad_wet 的判定本身很便宜（一次粗剔除 + 必要时的几段距离），
+	# 多扫几千个格子的代价远低于漏掉一段河。
 	var reach := LAKE_R + SHORE + step * 1.5
-	var i0 := maxi(0, floori((LAKE_C.x - reach + HALF) / step))
-	var i1 := mini(GRID, ceili((LAKE_C.x + reach + HALF) / step))
-	var j0 := maxi(0, floori((LAKE_C.y - reach + HALF) / step))
-	var j1 := mini(GRID, ceili((LAKE_C.y + reach + HALF) / step))
+	var lo := LAKE_C - Vector2(reach, reach)
+	var hi := LAKE_C + Vector2(reach, reach)
+	if not river_pts.is_empty():
+		lo.x = minf(lo.x, _river_box.position.x)
+		lo.y = minf(lo.y, _river_box.position.y)
+		hi.x = maxf(hi.x, _river_box.end.x)
+		hi.y = maxf(hi.y, _river_box.end.y)
+	var i0 := maxi(0, floori((lo.x + HALF) / step))
+	var i1 := mini(GRID, ceili((hi.x + HALF) / step))
+	var j0 := maxi(0, floori((lo.y + HALF) / step))
+	var j1 := mini(GRID, ceili((hi.y + HALF) / step))
 	var nw := i1 - i0 + 1
 	var nh := j1 - j0 + 1
 

@@ -30,7 +30,8 @@ func setup(world: Node3D) -> void:
 
 
 # ——————————————— 路径 / 目录 ———————————————
-func save_path(slot: int) -> String:
+## 只用常量，不碰实例状态 —— 所以可以是 static，供 peek_terrain_seed 在建世界前调用
+static func save_path(slot: int) -> String:
 	return "%s/slot_%d.save" % [SAVE_DIR, slot]
 
 
@@ -90,12 +91,28 @@ func _build_meta() -> Dictionary:
 
 
 func _meta_dict(day: int, season_name: String) -> Dictionary:
+	var seed_val: int = 20260921
+	if GameBus != null:
+		seed_val = int(GameBus.terrain_seed)
 	return {
 		"version": VERSION,
 		"saved_at": Time.get_datetime_string_from_system(true),
 		"day": day,
 		"season_name": season_name,
+		# 地图种子必须进元数据：读档时要在地形生成【之前】拿到它，
+		# 而 main 模块的数据要等 load() 完成后才反序列化，那时地形早就建好了。
+		"terrain_seed": seed_val,
 	}
+
+
+## 预读存档的地形种子。-1 表示该存档没有记录（旧档 / 不存在），调用方自行兜底。
+## 【为什么要 static】读档流程要在世界建好之前调用它，那时连 SaveSystem
+## 实例都还没 setup；只要不碰实例状态就能安全地做成静态入口。
+static func peek_terrain_seed(slot: int) -> int:
+	var m: Dictionary = _read_meta(slot)
+	if m.is_empty():
+		return -1
+	return int(m.get("terrain_seed", -1))
 
 
 # ——————————————— 保存 ———————————————
@@ -254,7 +271,7 @@ func slots_info() -> Array:
 
 
 # ——————————————— 内部工具 ———————————————
-func _read_meta(slot: int) -> Dictionary:
+static func _read_meta(slot: int) -> Dictionary:
 	var path: String = save_path(slot)
 	if not FileAccess.file_exists(path):
 		return {}

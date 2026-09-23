@@ -20,6 +20,9 @@ func _ready() -> void:
 		get_tree().quit(2)
 		return
 	m = MS.new()
+	# 固定种子：本脚本有大量具体数值期望（湖心水深、河道折点数、岸线半径），
+	# 换个种子这些数字就全变了。种子随机性由脚本末尾那组确定性断言单独负责。
+	m.forced_map_seed = 20260921
 	add_child(m)
 	for i in 12:
 		await get_tree().process_frame
@@ -79,22 +82,36 @@ func _run() -> void:
 	_ok(terr.water_depth_at(lake.x, lake.y) > 4.0,
 		"湖心水深超过 4 米（实得 %.2f）" % terr.water_depth_at(lake.x, lake.y))
 	_eq(terr.water_depth_at(0.0, 0.0), 0.0, "镇中心没有水")
-	_eq(terr.water_depth_at(lake.x + rim + 8.0, lake.y), 0.0, "湖区之外没有水")
 	_ok(terr.water_depth_at(lake.x + rim - 2.0, lake.y) >= 0.0, "水深不会为负")
+	# 【不能再写"离湖够远就没水"】现在还有河，离湖远不等于没水。
+	# 换一个明确既远离湖、又远离河的点：地图西北角。
+	# 河道的起点方位以「湖指向小镇的反方向」为中心，永远到不了西北角。
+	var far_pt := Vector2(-96.0, -96.0)
+	_ok(not terr.in_water(far_pt.x, far_pt.y), "远离湖与河的地方不属于水体范围")
+	_eq(terr.water_depth_at(far_pt.x, far_pt.y), 0.0, "远离湖与河的地方没有水")
 
 	# ——————— 2) 岸线闭合：湖盆之外不再低于水位 ———————
 	# 这是"湖有岸"的前提。地形基准高度改过之后必须重新确认这条，
 	# 否则水面会一路蔓延出湖盆、撞上扫描范围的硬边。
+	# 【为什么要放过有河的方位】河是合法地"低于水位"的一类地形——
+	# 湖盆外本该处处高于水位，唯独河流汇入的那一段例外。
+	# 不排除的话，这条断言会把正确的河道误判成"岸没闭合"。
 	var beyond := 0
 	for k in 24:
 		var a := TAU * float(k) / 24.0
 		var r := rim
+		var crossed_river := false
 		while r < rim + 42.0:
-			if terr.height_at(lake.x + cos(a) * r, lake.y + sin(a) * r) <= wy:
-				beyond += 1
+			var px := lake.x + cos(a) * r
+			var pz := lake.y + sin(a) * r
+			if terr.river_dist(px, pz) < 1e8:
+				crossed_river = true
+			if terr.height_at(px, pz) > wy:
 				break
 			r += 0.5
-	_eq(beyond, 0, "湖盆外缘之外处处高于水位（岸线闭合）")
+		if r >= rim + 42.0 and not crossed_river:
+			beyond += 1
+	_eq(beyond, 0, "湖盆外缘之外处处高于水位（岸线闭合，河流汇入口除外）")
 
 	# ——————— 3) 水面覆盖完整性 ———————
 	# 【为什么这条最重要】用户看到的问题就是"有的地方有水、有的地方没水"。
@@ -126,6 +143,54 @@ func _run() -> void:
 	# 允许少量：水面按格子生成，岸线那一圈格子必然有一小部分探进陆地（约 1 个格子宽）
 	_ok(float_pct < 15.0,
 		"悬空水面占比很低（%.1f%%，%d/%d）—— 预期只有岸边一圈" % [float_pct, floating, wet_total])
+
+	# ——————— 3b) 河流：覆盖稳定性 ———————
+	# 用户的要求是"保证河流覆盖的稳定性"。地形是随机的，河必须照样贯通，
+	# 所以这里沿中心线逐点验证——而不是只看一眼截图。
+	var rp: PackedVector2Array = terr.river_pts
+	_ok(rp.size() >= 2, "河道路径已生成（%d 个折点）" % rp.size())
+	if rp.size() >= 2:
+		var dry := 0
+		var min_depth := 1e9
+		var samples := 0
+		for i in range(rp.size() - 1):
+			var a2: Vector2 = rp[i]
+			var b2: Vector2 = rp[i + 1]
+			var n := maxi(1, int(ceil(a2.distance_to(b2) / 2.0)))
+			for k in range(n):
+				var p := a2.lerp(b2, float(k) / float(n))
+				var d: float = terr.water_depth_at(p.x, p.y)
+				samples += 1
+				if d <= 0.0:
+					dry += 1
+				min_depth = minf(min_depth, d)
+		_eq(dry, 0, "河道中心线处处有水，没有断流（采样 %d 点）" % samples)
+		# 河床被 min() 强制削到 RIVER_BED_Y，所以最浅也有 2 米出头
+		_ok(min_depth > 2.0, "河道最浅处 %.2f 米（足以游泳）" % min_depth)
+
+		# 河不能穿过小镇——游戏里没有桥，穿镇等于把镇子切成两半
+		var min_town_d := 1e9
+		for q in rp:
+			min_town_d = minf(min_town_d, (q as Vector2).distance_to(Vector2(TS.TOWN_CENTER)))
+		var need: float = float(TS.TOWN_R) + 6.0
+		_ok(min_town_d > need,
+			"河道离小镇中心 %.0f 米 > %.0f 米，不会把镇子切开" % [min_town_d, need])
+
+	# ——————— 3c) 水面不会漏到地图各处 ———————
+	# 湖与河道之外不该再有低于水位的地方，否则水面会从水体里"漏"出去——
+	# 这正是改动前水面一路蔓延到地图边缘的原因。
+	var strays := 0
+	var sx := -122.0
+	while sx <= 122.0:
+		var sz := -122.0
+		while sz <= 122.0:
+			if Vector2(sx, sz).distance_to(lake) > rim \
+					and terr.river_dist(sx, sz) > 1e8 \
+					and terr.height_at(sx, sz) <= wy:
+				strays += 1
+			sz += 4.0
+		sx += 4.0
+	_eq(strays, 0, "湖与河道之外没有低于水位的地方（水面不漏）")
 
 	# ——————— 4) 游泳 ———————
 	var player = m.player
@@ -186,3 +251,66 @@ func _run() -> void:
 	_ok(not m.hud.uw_overlay.visible, "出水后水下遮罩关闭")
 
 	GameBus.touch_dive = false
+
+	# ——————— 8) 地图随机生成 = 种子确定性 ———————
+	# "随机地图"必须建立在"同种子 = 同地图"之上，否则存档里记的种子毫无意义，
+	# 读档会开到另一片大陆。这两条一起才能定义"随机但可复原"。
+	#
+	# 不 add_child：不挂进树就不会生成地面网格，只算高度函数，快得多。
+	var t_same = TS.new()
+	t_same.set_map_seed(m.map_seed)
+	var same_diff := 0.0
+	for i in 40:
+		var px2 := -100.0 + float(i) * 5.0
+		same_diff = maxf(same_diff, absf(float(t_same.height_at(px2, 33.0))
+			- float(terr.height_at(px2, 33.0))))
+	_ok(same_diff < 0.0001, "同一种子重建出完全一致的地形（最大偏差 %.6f 米）" % same_diff)
+
+	var t_other = TS.new()
+	t_other.set_map_seed(m.map_seed + 12345)
+	# 【为什么要铺二维网格】低频噪声的波长约 139 米，地图才 260 米宽——
+	# 沿一条线取 40 个点只覆盖了不到两个波，样本严重偏斜，会得出
+	# "换种子地图差不多"的错误结论。铺满整张图才代表"这是另一张地图"。
+	var diff := 0
+	var total := 0
+	var abs_sum := 0.0
+	for gx in range(-6, 7):
+		for gz in range(-6, 7):
+			var px3 := float(gx) * 19.0
+			var pz3 := float(gz) * 19.0
+			var d3 := absf(float(t_other.height_at(px3, pz3))
+				- float(terr.height_at(px3, pz3)))
+			total += 1
+			abs_sum += d3
+			if d3 > 0.5:
+				diff += 1
+	var mean_diff := abs_sum / float(total)
+	_ok(diff > total / 2,
+		"换个种子后多数采样点地形不同（%d/%d 个点差异 > 0.5 米）" % [diff, total])
+	_ok(mean_diff > 1.0, "换个种子后地形平均相差 %.2f 米" % mean_diff)
+
+	var rp_other: PackedVector2Array = t_other.river_pts
+	_ok(rp_other.size() >= 2 and rp_other[0].distance_to(rp[0]) > 1.0,
+		"换个种子河道也跟着变（起点位移 %.1f 米）" % rp_other[0].distance_to(rp[0]))
+
+	# 河道换了，但"处处有水"这条必须仍然成立——这才是稳定性的完整含义
+	var dry_other := 0
+	for i in range(rp_other.size() - 1):
+		var pa: Vector2 = rp_other[i]
+		var pb: Vector2 = rp_other[i + 1]
+		var nn := maxi(1, int(ceil(pa.distance_to(pb) / 4.0)))
+		for k in range(nn):
+			var p2 := pa.lerp(pb, float(k) / float(nn))
+			if float(t_other.water_depth_at(p2.x, p2.y)) <= 0.0:
+				dry_other += 1
+	_eq(dry_other, 0, "换个种子后河道依然不断流")
+
+	t_same.free()
+	t_other.free()
+
+	# ——————— 9) 种子必须能存档 ———————
+	# 读档流程要在地形生成【之前】拿到种子，所以它走 __meta 而不是模块数据。
+	var SaveS = load("res://scripts/save_system.gd")
+	m.save_sys.save(2)
+	var back: int = SaveS.peek_terrain_seed(2)
+	_eq(back, int(GameBus.terrain_seed), "存档 __meta 记下了地图种子，且能预读回来")
