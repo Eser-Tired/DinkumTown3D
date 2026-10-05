@@ -165,13 +165,19 @@ func _build() -> void:
 	_breath_full_w = 312.0
 
 	# 交互提示（屏幕中下）
+	# 【必须显式隐藏】Label 默认 visible=true，而这两行在开局是空文本。
+	# 空文本框照样会被 touch_reserved_rects() 当成保留区算进去，
+	# 于是触控层的「农事」按钮被判定"压住了 HUD"——竖屏下必报 bad=1。
+	# 后续的显隐由 set_prompt / set_build 按文本是否为空接管。
 	prompt_label = _label(22, Vector2(390, 690), 660)
 	prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	prompt_label.visible = false
 	add_child(prompt_label)
 
 	# 建造菜单
 	build_label = _label(18, Vector2(1050, 300), 320)
 	build_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	build_label.visible = false
 	add_child(build_label)
 
 	# 帮助
@@ -179,7 +185,7 @@ func _build() -> void:
 	add_child(help_panel)
 	help_label = _label(16, Vector2(34, 650), 540)
 	help_label.size = Vector2(540, 140)
-	help_label.text = "WASD/方向键 移动 · Shift 奔跑 · 空格 跳跃\n鼠标右键拖拽 转视角 · 滚轮 缩放\nE 采集 · 左键 攻击 · Q 换武器 · 1-4 切物品栏\nB 建造模式 · 建造中 1-4 选建筑 · 左键放置\n进水里自动游泳 · Ctrl 下潜、松开上浮（憋气有限）\nI 背包 · F 农事 · G 换作物 · T 加速时间 · H 隐藏帮助\nF2 保存 · F3 读取 · M 静音 · Esc 暂停菜单"
+	help_label.text = "WASD/方向键 移动 · Shift 奔跑 · 空格 跳跃\n鼠标右键拖拽 转视角 · 滚轮 缩放\nE 采集 · 左键 攻击 · Q 换武器 · 1-4 切物品栏\nB 建造模式 · 建造中 1-4 选建筑 · 左键放置\n进水里自动游泳 · Ctrl 下潜、松开上浮（憋气有限）\nI 背包 · F 交互（进屋 / 床边睡觉 / 农事）· G 换作物 · T 加速时间 · H 隐藏帮助\nF2 保存 · F3 读取 · M 静音 · Esc 暂停菜单"
 	add_child(help_label)
 
 	# 浮动提示
@@ -217,7 +223,7 @@ func set_touch_mode(w: float, h: float, k: float, k_text: float = -1.0) -> float
 		+ "屏幕空白处拖动转视角，双指捏合缩放\n"
 		+ "点击画面：采集附近的资源 / 攻击动物\n"
 		+ "底栏 4 格：点一下切换武器或建筑\n"
-		+ "右侧：使用（攻击/放置）· 跳 · 潜 · 农事 · 旋转\n"
+		+ "右侧：使用（进屋 / 床边睡觉 / 攻击 / 放置）· 跳 · 潜 · 农事 · 旋转\n"
 		+ "进水里自动游泳，按住「潜」下潜、松开上浮\n"
 		+ "左上：菜单 · 背包 · 建造　　右上：存 / 读 / 加速 / 静音"
 		+ "\n背包里可点武器直接装备，再点背包键或 Esc 关闭\n"

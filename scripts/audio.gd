@@ -177,7 +177,10 @@ func _on_player_step(speed: float, pos: Vector3) -> void:
 	var i: int = rng.randi() % _steps.size()
 	var v: AudioStreamWAV = _steps[i]
 	var s: float = clampf(speed / 6.0, 0.15, 1.0)
-	_shot(v, _sfx_base_db - 12.0 + s * 8.0, rng.randf_range(0.90, 1.15))
+	# 音高跟着速度走：慢走偏闷、奔跑偏脆，比纯随机更容易听出"在跑"。
+	# 叠一点随机是为了避免同一步的两次播放完全一样。
+	var pc := lerpf(0.93, 1.12, s) * rng.randf_range(0.98, 1.02)
+	_shot(v, _sfx_base_db - 12.0 + s * 8.0, pc)
 
 
 func _on_tool_used(tool_name: String, pos: Vector3) -> void:
@@ -467,26 +470,41 @@ func _stereo(l: PackedFloat32Array, r: PackedFloat32Array) -> PackedFloat32Array
 
 
 # ——————————————————— 一次性音效合成 ———————————————————
-## 脚步：滤波噪声爆 + 低频 thud
+## 脚步：干脆的一记踩踏 —— 低频落地闷响 + 极短的噪声脆响 + 中频"啪"
+##
+## 【为什么换掉旧版】旧版是"沙砾噪声 + 78Hz 闷响"的 0.11 秒长尾摩擦声：
+## 单听还行，连续走动时尾巴叠在一起，听着像在沙子里蹭而不是踩地。
+## 新版压到 0.075 秒，靠三件事把"落点"做出来：
+##   1) 低频从 ~100Hz 快速下滑（踩实的体感，衰减比旧版快一档）
+##   2) 只在前 ~12ms 出现的噪声脆响（草茎 / 碎土被压断）
+##   3) 780Hz 的中频瞬态（脚步声"啪"的那一下，决定听感干不干脆）
+## 每个变体随机抖一下低频起点与衰减速度，连续走 4 下不会像同一个采样在复读。
 func _syn_step() -> AudioStreamWAV:
 	var sr := SR_HI
-	var n: int = int(float(sr) * 0.11)
+	var n: int = int(float(sr) * 0.075)
 	var buf := PackedFloat32Array()
 	buf.resize(n)
+	var f_lo: float = rng.randf_range(88.0, 124.0)     # 落地闷响的起始频率
+	var damp: float = rng.randf_range(0.86, 1.20)      # 衰减速度抖动
+	var snap_hz: float = rng.randf_range(720.0, 860.0) # 中频瞬态音高
 	var lp := 0.0
 	var ph := 0.0
 	var i := 0
 	while i < n:
 		var t: float = float(i) / float(sr)
+		ph += TAU * f_lo * exp(-t * 22.0) / float(sr)
+		var thud: float = sin(ph) * exp(-t * 34.0 * damp) * 0.45
 		var w: float = rng.randf_range(-1.0, 1.0)
-		lp += 0.22 * (w - lp)
-		var grit: float = w - lp                      # 高通留下的“沙砾”
-		ph += TAU * (78.0 + 26.0 * exp(-t * 30.0)) / float(sr)
-		var thud: float = sin(ph) * exp(-t * 30.0) * 0.75
-		var env: float = exp(-t * 22.0)
-		buf[i] = (grit * 0.55 + thud) * env
+		lp += 0.7 * (w - lp)
+		# 【配比是量出来的，不是拍的】脚步的辨识度主要来自摩擦噪声，
+		# 低频闷响只负责"体重感"。噪声压太弱（或衰减太快）时，整条音效会被
+		# 低频正弦吃成一记闷鼓——前段过零率会从 ~450 掉到 ~130，
+		# 用 tools/audio_shot 打印的分段过零率能直接看出来。
+		var crunch: float = (w - lp) * exp(-t * 38.0 * damp) * 0.95
+		var snap: float = sin(TAU * snap_hz * t) * exp(-t * 110.0) * 0.32
+		buf[i] = (thud + crunch + snap) * exp(-t * 12.0)
 		i += 1
-	return _make_stream(_norm(buf, 0.80), sr, false, false)
+	return _make_stream(_norm(buf, 0.75), sr, false, false)
 
 
 ## 采集木头：低沉 thud + 短噪声

@@ -18,6 +18,16 @@ build/
 /menu_shots*/
 /water_shots/
 /water_shots*/
+/interior_shots/
+/interior_shots*/
+/jump_shots/
+/jump_shots*/
+
+# 音效试听导出（tools/audio_shot.gd 的产物）
+/_audio_preview/
+
+# 本地 AI 助手的工作目录（会话笔记，不是项目源码）
+/.workbuddy-ai/
 
 # 自检脚本落盘的日志（combat_check.gd / e2e.gd 等）
 /combat_check.log

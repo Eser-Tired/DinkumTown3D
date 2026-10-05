@@ -17,6 +17,8 @@ var jump_v := 0.0
 var jump_h := 0.0
 var on_ground := true
 var walk_phase := 0.0
+## 空中姿态权重 0..1：起跳/落地各留约 0.1 秒过渡，避免四肢瞬变
+var _air_pose := 0.0
 
 # —— 水域 ——
 ## 水深超过 SWIM_MIN 就进入游泳：玩家身高约 1.8，水过腰再走就不合理了
@@ -35,6 +37,20 @@ var swimming := false           ## 是否处于游泳状态
 var diving := false             ## 是否正在下潜
 var breath := 1.0               ## 剩余憋气 0..1
 var _water_level := 0.0         ## 水面高度（由 terrain 提供）
+
+# —— 室内（飞地）模式 ——
+## 进屋后玩家被传送到远离地图的室内空间（见 interior.gd）。那里既没有地形也没有水，
+## 所以"贴地"和"是不是水"这两件事必须整体换数据源：继续问 terrain.height_at
+## 会被户外地形高度硬拉回地表，玩家会站在半空中或者直接掉回小镇。
+var indoor := false
+var floor_y := 0.0              ## 室内地板高度（世界 y）
+var bounds_center := Vector2.ZERO   ## 室内可行走矩形中心（xz）
+var bounds_half := Vector2(112.0, 112.0)   ## 半宽 / 半深
+## 第三人称在屋里必须拉近：默认 9 米的机位直接穿到墙外，屏幕上一半是墙背面。
+## 上限 4.0 留给玩家用滚轮微调；进屋默认值 2.8 是"屋子宽 ~6 米时相机仍在墙内"算出来的。
+const INDOOR_CAM_MAX := 4.0
+const INDOOR_CAM_ENTER := 2.8
+var _cam_dist_outdoor := 9.0
 
 var cam_yaw: Node3D
 var cam_pitch: Node3D
@@ -78,6 +94,38 @@ func setup(terr: Node3D, obs: Array, spawn2: Vector2) -> void:
 	# 而相机在局部 +Z 侧朝 -Z 看，玩家一开局就是"背对相机站着"，
 	# 建造预览会直接落在身后。朝向 = 相机朝向（aim_dir），即 yaw + PI。
 	model.rotation.y = yaw + PI
+
+
+## 传送进室内：切换地面数据源、可行走矩形与家具避让圆，并拉近镜头。
+## cols 由 interior.gd 给出（世界 xz + 半径）。
+func enter_indoor(fy: float, center: Vector2, half: Vector2, cols: Array) -> void:
+	indoor = true
+	floor_y = fy
+	bounds_center = center
+	bounds_half = half
+	obstacles = cols
+	_cam_dist_outdoor = cam_dist
+	cam_dist = minf(cam_dist, INDOOR_CAM_ENTER)
+	# 水里进屋（虽然目前没有水上的屋子）不该带着游泳/下潜状态进屋
+	swimming = false
+	diving = false
+	swim_depth = 0.0
+	jump_h = 0.0
+	jump_v = 0.0
+	on_ground = true
+
+
+## 回到户外：还原地形贴地、世界边界与镜头距离
+func exit_indoor(cols: Array) -> void:
+	indoor = false
+	obstacles = cols
+	cam_dist = _cam_dist_outdoor
+	swim_depth = 0.0
+	swimming = false
+	diving = false
+	jump_h = 0.0
+	jump_v = 0.0
+	on_ground = true
 
 
 func _mi(mesh: Mesh, m: Material, pos := Vector3.ZERO, rot := Vector3.ZERO, scl := Vector3.ONE) -> MeshInstance3D:
@@ -165,6 +213,9 @@ func _input(event: InputEvent) -> void:
 			cam_dist = maxf(3.5, cam_dist - 0.9)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			cam_dist = minf(22.0, cam_dist + 0.9)
+			# 屋里再往后拉就穿墙了，上限压住（室外不生效）
+			if indoor:
+				cam_dist = minf(cam_dist, INDOOR_CAM_MAX)
 
 
 func _process(dt: float) -> void:
@@ -250,15 +301,24 @@ func _process(dt: float) -> void:
 			p.z = o.pos.y + d2.y
 
 	# 世界边界
-	var lim := 112.0
-	p.x = clampf(p.x, -lim, lim)
-	p.z = clampf(p.z, -lim, lim)
+	if indoor:
+		p.x = clampf(p.x, bounds_center.x - bounds_half.x, bounds_center.x + bounds_half.x)
+		p.z = clampf(p.z, bounds_center.y - bounds_half.y, bounds_center.y + bounds_half.y)
+	else:
+		var lim := 112.0
+		p.x = clampf(p.x, -lim, lim)
+		p.z = clampf(p.z, -lim, lim)
 
 	# —— 垂直：陆地贴地、水中漂浮 ——
 	# 用位移【之后】的位置重新判定一次：这一步决定玩家是被地面托着还是被水托着，
 	# 用水域起点位置判定会在跨过岸线的那一帧做错决定。
-	var gy: float = terrain.height_at(p.x, p.z)
-	swim_depth = _water_depth(p.x, p.z)
+	var gy: float
+	if indoor:
+		gy = floor_y
+		swim_depth = 0.0        # 屋里没有水，别让 HUD 冒出憋气条
+	else:
+		gy = terrain.height_at(p.x, p.z)
+		swim_depth = _water_depth(p.x, p.z)
 	swimming = swim_depth > SWIM_MIN
 	if swimming:
 		on_ground = false
@@ -323,15 +383,29 @@ func _process(dt: float) -> void:
 		head.rotation.z = sin(walk_phase * 0.5) * 0.03
 		head.position.y = 1.62 + abs(sin(walk_phase)) * 0.02
 
-	# 跳跃姿态
+	# —— 空中姿态：收腿 + 手臂向后下方摆 ——
 	# 【必须排除游泳】游泳时 on_ground 恒为 false，不加这个判断的话
-	# 上面的划水动作会被"举双手"覆盖掉，水里看起来像在投降。
+	# 上面的划水动作会被空中姿态覆盖掉，水里看起来像在蹬腿。
+	#
+	# 【为什么不再举双手】旧版把双臂硬拧到 -1.1 rad，手臂末端正好落到模型 +Z 侧
+	# （也就是身前），跳起来像在推门/投降。现在改成：腿向前收起（跳跃的"提膝"），
+	# 手臂自然后摆一点，落点更像在跳而不是在够东西。
+	#
+	# 【为什么用权重而不是直接赋值】硬切会在起跳和落地各闪一下。
+	# 这里把"空中姿态"当成一个 0→1 的权重去混地面姿态，两个方向各约 0.1 秒过渡。
+	# 注意这段必须在走路/游泳姿态【之后】执行，否则会被它们覆盖。
 	model.position.y = 0.0
-	if not on_ground and not swimming:
-		var arm_l := model.get_node_or_null("ArmL")
-		if arm_l:
-			arm_l.rotation.x = -1.1
-			ab.rotation.x = -1.1
+	var want_air := 0.0 if (on_ground or swimming) else 1.0
+	_air_pose = lerpf(_air_pose, want_air, clampf(dt * 12.0, 0.0, 1.0))
+	if _air_pose > 0.001:
+		if la:
+			la.rotation.x = lerpf(la.rotation.x, -0.55, _air_pose)
+		if lb:
+			lb.rotation.x = lerpf(lb.rotation.x, -0.28, _air_pose)
+		if aa:
+			aa.rotation.x = lerpf(aa.rotation.x, 0.42, _air_pose)
+		if ab:
+			ab.rotation.x = lerpf(ab.rotation.x, 0.42, _air_pose)
 
 	# —— 战斗冷却与挥砍动画 ——
 	_update_combat(dt)

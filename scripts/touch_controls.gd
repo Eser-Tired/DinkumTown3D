@@ -139,7 +139,13 @@ func _rebuild() -> void:
 	_vs = get_viewport().get_visible_rect().size
 	if _vs.x < 8.0 or _vs.y < 8.0:
 		return
-	_k = clampf(minf(_vs.x / REF.x, _vs.y / REF.y), 0.60, 2.2)
+	# 【极扁横屏要放开缩放下限】0.60 这个下限本来是给竖屏设的（按钮不能太小），
+	# 但手机横过来只有 ~375 高，系统钮两行 + 旋转/放置 + 使用/跳/潜 全挤在右侧，
+	# 按 0.60 算必然互相压住（812x375 上能报 5 处按钮重叠 + 菜单压住 HUD 资源栏）。
+	# 高度不足 520 时允许缩到 0.42：按钮小一点，总比重叠到点不着强。
+	# 竖屏与平板（高度 ≥ 720）走原来的 0.60，完全不受影响。
+	var k_floor := 0.42 if _vs.y < 520.0 else 0.60
+	_k = clampf(minf(_vs.x / REF.x, _vs.y / REF.y), k_floor, 2.2)
 	var W := _vs.x
 	var H := _vs.y
 	var k := _k
@@ -223,13 +229,18 @@ func _btn_at(text: String, action: String, cx: float, cy: float, w: float, h: fl
 	b.text = text
 	b.add_theme_font_size_override("font_size", maxi(10, int(fs * _k)))
 	var sz := Vector2(w, h)
-	b.size = sz
-	b.position = Vector2(cx - sz.x * 0.5, cy - sz.y * 0.5)
 	b.focus_mode = Control.FOCUS_NONE
 	_style(b, Color(0.10, 0.14, 0.20, 0.52), Color(0.18, 0.27, 0.38, 0.80))
 	var act := action
 	b.pressed.connect(func(): GameBus.request_touch_action(act))
 	add_child(b)
+	# 【尺寸必须在 add_child 之后再设】Control.set_size() 会拿"当前缓存的
+	# minimum size"把尺寸钳一遍，而字体/样式 override 要等节点进树刷新 theme
+	# 才进那个缓存。在进树前设尺寸，就会被默认主题的 (40, 31) 撑大——
+	# 大 k 下看不出来，小 k 下所有按 k 算的行距集体失真（812x375 上按钮叠成一片）。
+	b.custom_minimum_size = sz
+	b.size = sz
+	b.position = Vector2(cx - sz.x * 0.5, cy - sz.y * 0.5)
 	_btn_rects.append(Rect2(b.position, sz))
 	return b
 
@@ -251,8 +262,6 @@ func _make_hold_button(text: String, action: String, cx: float, cy: float,
 	b.text = text
 	b.add_theme_font_size_override("font_size", maxi(10, int(fs * _k)))
 	var sz := Vector2(w, h)
-	b.size = sz
-	b.position = Vector2(cx - sz.x * 0.5, cy - sz.y * 0.5)
 	b.focus_mode = Control.FOCUS_NONE
 	_style(b, Color(0.12, 0.20, 0.30, 0.54), Color(0.24, 0.44, 0.60, 0.86))
 	var act := action
@@ -263,6 +272,10 @@ func _make_hold_button(text: String, action: String, cx: float, cy: float,
 		if not b.button_pressed:
 			_set_hold(act, false))
 	add_child(b)
+	# 与 _btn_at 同理：尺寸必须等进树、theme 缓存刷新之后再设
+	b.custom_minimum_size = sz
+	b.size = sz
+	b.position = Vector2(cx - sz.x * 0.5, cy - sz.y * 0.5)
 	_btn_rects.append(Rect2(b.position, sz))
 	_hold_btns.append(b)
 	return b
@@ -282,6 +295,16 @@ func _style(b: Button, normal: Color, pressed: Color) -> void:
 	var p := StyleBoxFlat.new()
 	p.bg_color = pressed
 	p.set_corner_radius_all(int(16 * _k))
+	# 【必须显式清掉内边距】StyleBox 默认带着一圈 content margin，按钮的实际高度
+	# 会被它撑到 ~31px 的下限，我们设的 52*k 在小 k 下根本落不到实处。
+	# 于是所有按 k 算出来的行距全部失真：极扁横屏上系统钮两行、旋转/放置
+	# 直接叠在一起（见 tools/touch_layout_check 的 OVERLAP 断言）。
+	# 压成 0 之后，"设多大就是多大"，间距按 k 算才自洽。
+	for sb in [n, p]:
+		sb.content_margin_left = 2.0
+		sb.content_margin_right = 2.0
+		sb.content_margin_top = 0.0
+		sb.content_margin_bottom = 0.0
 	b.add_theme_stylebox_override("normal", n)
 	b.add_theme_stylebox_override("hover", n)
 	b.add_theme_stylebox_override("pressed", p)

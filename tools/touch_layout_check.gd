@@ -59,7 +59,11 @@ func _ready() -> void:
 			var a: Button = btns[i]
 			var b: Button = btns[j]
 			if _overlap(a.get_global_rect(), b.get_global_rect()):
-				print("FAIL OVERLAP btn '%s' vs '%s'" % [a.text, b.text])
+				# 带上实际矩形：按钮的最终尺寸会被主题最小尺寸钳一下，
+				# 光看按钮名算不出是谁挤了谁。
+				print("FAIL OVERLAP btn '%s' %s min=%s vs '%s' %s min=%s"
+					% [a.text, a.get_global_rect(), a.get_combined_minimum_size(),
+						b.text, b.get_global_rect(), b.get_combined_minimum_size()])
 				bad += 1
 	# 2) 按钮不得压住 HUD 保留区
 	for i in btns.size():
