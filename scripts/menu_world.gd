@@ -57,6 +57,7 @@ func _ready() -> void:
 
 	# 只铺植被与少量建筑剪影，不铺可采集物（没有玩家去采）
 	_scatter_decor()
+	preload("res://scripts/vegetation_scatter.gd").build(self, terrain, menu_seed)
 
 	# 昼夜：把时间起点设成清晨，菜单一进来就是透亮的早上
 	dn = DayNightS.new()

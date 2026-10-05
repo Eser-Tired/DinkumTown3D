@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>自然、人物与动物替换验收</title>
+<style>
+:root,html[data-theme="dark"]{color-scheme:dark;--bg:#111923;--card:#1b2735;--fg:#e9eff5;--muted:#adc0ca;--border:#35485b;--accent:#b7d99a}html[data-theme="light"]{color-scheme:light;--bg:#eef3f0;--card:#fff;--fg:#1d2a36;--muted:#53677b;--border:#cbd6df;--accent:#355d22}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 system-ui,"Microsoft YaHei",sans-serif}main{max-width:1180px;margin:auto;padding:45px 24px}h1{font-size:clamp(27px,4vw,43px);line-height:1.3}h2{font-size:24px;margin:0 0 12px}section{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;margin:24px 0}.muted{color:var(--muted)}a{color:var(--accent)}button,select{font:inherit;background:var(--card);color:var(--fg);border:1px solid var(--border);padding:9px 14px;border-radius:9px}#theme{position:fixed;right:18px;top:14px;z-index:4;cursor:pointer}.metrics,.gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.metric{padding:18px;background:var(--bg);border-radius:12px}.metric strong{display:block;color:var(--accent);font-size:29px}.compare{--split:50%;position:relative;aspect-ratio:16/9;margin-top:18px;overflow:hidden;border-radius:10px;background:#000}.compare img{position:absolute;width:100%;height:100%;object-fit:contain}.compare #before{clip-path:inset(0 calc(100% - var(--split)) 0 0)}.compare:after{content:"";position:absolute;left:var(--split);height:100%;width:2px;background:#fff}.tag{position:absolute;top:10px;background:#111c;color:#fff;padding:4px 12px}.left{left:10px}.right{right:10px}input[type=range]{width:100%;accent-color:var(--accent);margin:18px 0}figure{margin:0}figure img,.single{width:100%;border-radius:10px}figcaption{font-size:14px;color:var(--muted);margin-top:6px}table{width:100%;border-collapse:collapse}td,th{border-bottom:1px solid var(--border);padding:12px;text-align:left;vertical-align:top}.scroll{overflow:auto}pre{overflow:auto;padding:14px;background:var(--bg);border-radius:9px;font-size:14px}code{font-size:.9em}@media(max-width:750px){main{padding:65px 14px 20px}section{padding:16px}.metrics{grid-template-columns:1fr}.gallery{grid-template-columns:1fr 1fr}td,th{padding:8px}}@media(max-width:480px){.gallery{grid-template-columns:1fr}}
+</style></head>
+<body><button id="theme" aria-label="切换深浅色">切换深浅色</button><main>
+<p class="muted">DinkumTown3D · Godot 4.7.2 · 2026-10-05</p><h1>新自然环境、冒险者与野生动物</h1>
+<p>树木、灌木、草丛、岩石接入 Quaternius 自然包，新增密集草甸、花、蕨、三叶草和蘑菇。人物改为带背包的冒险者，野生动物改为鹿、雄鹿、狐狸。重启游戏即可看到，新增美术随源码交付。</p>
+<section><div class="metrics"><div class="metric"><strong>68</strong>免费自然包模型已完整转换</div><div class="metric"><strong>37,151</strong>固定地图新增地被实例</div><div class="metric"><strong>181 / 0</strong>专项断言通过 / 失败</div></div><p class="muted">固定种子 20260921。原地被有效实例 1,253，总计 38,404；实例包括草、花、蕨、灌木和碎石，不是草叶数量。原有191个采集点位置与存档身份保持一致。</p></section>
+<section><h2>同机位前后对比</h2><label for="view">视角：</label><select id="view"><option value="forest">树林与地被</option><option value="meadow">近看草甸</option><option value="player">人物</option><option value="walk">行走姿态</option><option value="attack">攻击姿态</option></select><div id="compare" class="compare"><img id="after" src="shots/nature_after_forest.png" alt="替换后"><img id="before" src="shots/nature_before_forest.png" alt="替换前"><span class="tag left">上一版</span><span class="tag right">本轮替换</span></div><label for="split">拖动查看：</label><input id="split" type="range" min="0" max="100" value="50" aria-label="前后对比位置"><p class="muted">两组照片使用相同种子、机位和日照。镇中心、农田和连接通道预留空间，新增地被不会增加阻挡碰撞。28米分块、65米可见范围控制绘制开销。</p></section>
+<section><h2>人物和动物已接入骨骼动画</h2><div class="gallery">
+<figure><img src="shots/nature_after_player.png" alt="冒险者人物"><figcaption>冒险者：背包与服装为导入模型。</figcaption></figure>
+<figure><img src="shots/nature_after_walk.png" alt="人物行走"><figcaption>走路、跑步和挥砍使用原生动画。</figcaption></figure>
+<figure><img src="shots/nature_after_swim_pose.png" alt="人物在水中划水"><figcaption>原有游泳动作适配到骨骼，并修正前倾方向。</figcaption></figure>
+<figure><img src="shots/nature_after_deer.png" alt="鹿"><figcaption>鹿：沿用原狩猎槽位、掉落和重生。</figcaption></figure>
+<figure><img src="shots/nature_after_stag.png" alt="雄鹿"><figcaption>雄鹿：同一包的带角变体。</figcaption></figure>
+<figure><img src="shots/nature_after_fox.png" alt="狐狸"><figcaption>狐狸：体型单独适配，使用四足步态。</figcaption></figure>
+</div><details><summary>查看动物死亡姿态</summary><img class="single" src="shots/nature_after_death.png" alt="雄鹿死亡动画末帧"></details><p>三种动物合计15只，按原有槽位顺序接入，旧存档血量和死亡状态继续有效。动物保留游走、逃跑、受伤、掉落和重生，使用走路、奔跑、受伤、死亡动画。</p></section>
+<section><h2>范围与来源</h2><div class="scroll"><table><thead><tr><th>部分</th><th>本轮结果</th><th>来源</th></tr></thead><tbody>
+<tr><td>自然环境</td><td>普通树、扭曲树、灌木、草、岩石替换；湖岸原棕榈点位换松树；树桩保留尺寸，换枯树树皮和法线。花、蕨、三叶草、蘑菇、碎石增加地被层次。</td><td><a href="https://store.godotengine.org/asset/quaternius/stylized-nature-megakit/">Stylized Nature MegaKit</a></td></tr>
+<tr><td>人物</td><td>Adventurer，24个动画。原有胶囊碰撞、移动、跳跃、游泳和战斗继续由游戏控制。</td><td><a href="https://quaternius.com/packs/ultimatemodularcharacters.html">Ultimate Modular Men</a></td></tr>
+<tr><td>动物</td><td>Deer、Stag、Fox，替换原袋鼠与鸸鹋。用户已授权扩大到商店之外并更换种类。</td><td><a href="https://quaternius.com/packs/ultimateanimatedanimals.html">Ultimate Animated Animals</a></td></tr>
+<tr><td>建筑等</td><td>建筑、家具、道具、地表沿用上一轮 EmacE 替换。作物、水域与 UI 保留现有实现。</td><td><a href="emace_full.html">上一轮验收</a></td></tr>
+</tbody></table></div><p class="muted">三套新美术均为CC0。免费自然包是68个模型，完整版宣传的116个模型不包含在免费包里；包中没有房屋、独立地形纹理、人物或动物。全部68个场景可用，游戏按用途选择变体；未放置的花瓣与铺路石保留在资产目录。</p></section>
+<section><h2>验证证据</h2><div class="scroll"><table><tbody>
+<tr><td>新增行为</td><td>nature_check：181项通过。真实渲染后端逐一检查37,151个实例，贴地、水域、农田和通道 bad=0；同种子指纹相同，换种子改变；真实骨骼动作、死亡和重生通过。</td></tr>
+<tr><td>旧地图</td><td>191个采集点的类型、数量和位置 SHA-256 与前版完全相同，装饰地被不参与旧资源编号。</td></tr>
+<tr><td>回归</td><td>combat_check 102、water_check 38、physics_check 23、ui_check 1907项全绿；e2e、interior_check均 fails=0；上轮素材验收34和90项通过，关闭EmacE时40项回退验收通过。</td></tr>
+<tr><td>触控</td><td>1440×810、1280×720、1920×1080、2560×1440、720×1280、810×1440、1080×1920、1440×2560全部 bad=0。</td></tr>
+<tr><td>资产</td><td>共享纹理最大1024像素，树皮保留法线，叶片 alpha 裁切和风动。新增美术约28.1 MiB，127个资源依赖全部位于项目内，没有下载临时路径或 addons。</td></tr>
+<tr><td>渲染采样</td><td>RTX 5060 Laptop，1440×810，固定截图场景（人物/动物暂停、HUD隐藏）预热后采样120帧：帧间隔中位数5.54ms、P95 6.47ms。该机位577次绘制、约277万图元。</td></tr>
+</tbody></table></div><p class="muted">帧时间只代表本机与这个静态机位，未测手机。部分 headless 回归退出时仍有 ObjectDB 泄漏提示，本轮未消除；断言全部通过，没有脚本错误。MultiMesh几何验收使用窗口模式，headless 的 Dummy RenderingServer 不能读回真实实例变换。</p></section>
+<section><h2>主菜单也使用新自然环境</h2><img class="single" src="shots/nature_menu.png" alt="新自然环境主菜单"></section>
+<section><h2>使用和复现</h2><p>新增素材已放入 <code>assets/</code> 并随 Git 同步。上一轮 EmacE 的许可仍要求本地安装；它不影响本轮CC0人物、动物和自然包的交付。素材来源、转换方法和验收命令见 <a href="nature_assets.md">接入说明</a>。</p><pre># Godot窗口模式验收
+Godot --path . res://tools/nature_check.tscn --quit-after 3000
+
+# 对照上一版外观
+Godot --path . -- --no-nature --no-characters</pre></section>
+</main><script>
+let saved;try{saved=localStorage.getItem('nature-theme')}catch{}
+document.documentElement.dataset.theme=saved||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+document.getElementById('theme').onclick=()=>{const value=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=value;try{localStorage.setItem('nature-theme',value)}catch{}};
+document.getElementById('split').oninput=e=>document.getElementById('compare').style.setProperty('--split',e.target.value+'%');
+document.getElementById('view').onchange=e=>{for(const phase of ['before','after'])document.getElementById(phase).src='shots/nature_'+phase+'_'+e.target.value+'.png'};
+</script></body></html>

@@ -7,6 +7,7 @@ const TerrainS := preload("res://scripts/terrain.gd")
 const PlayerS := preload("res://scripts/player.gd")
 const KangarooS := preload("res://scripts/kangaroo.gd")
 const EmuS := preload("res://scripts/emu.gd")
+const WildlifeS := preload("res://scripts/wildlife.gd")
 const DayNightS := preload("res://scripts/day_night.gd")
 const HUDS := preload("res://scripts/hud.gd")
 const AudioS := preload("res://scripts/audio.gd")
@@ -136,6 +137,7 @@ func _ready() -> void:
 
 	_build_town()
 	_scatter_flora()
+	preload("res://scripts/vegetation_scatter.gd").build(self, terrain, map_seed)
 
 	player = PlayerS.new()
 	player.name = "Player"
@@ -903,7 +905,9 @@ func _spawn_critters() -> void:
 		var p := _random_spot(42.0, 38.0, 3.0)
 		if p == Vector2.ZERO:
 			continue
-		var k: Node3D = KangarooS.new()
+		var k: Node3D = KangarooS.new() if OS.get_cmdline_user_args().has("--no-characters") else WildlifeS.new()
+		if k is WildlifeS:
+			k.species = "Stag" if i % 3 == 0 else "Deer"
 		add_child(k)
 		k.setup(terrain, p, player)
 		_register_critter(k)
@@ -912,7 +916,10 @@ func _spawn_critters() -> void:
 		var p := _random_spot(48.0, 40.0, 4.0)
 		if p == Vector2.ZERO:
 			continue
-		var e: Node3D = EmuS.new()
+		var e: Node3D = EmuS.new() if OS.get_cmdline_user_args().has("--no-characters") else WildlifeS.new()
+		if e is WildlifeS:
+			e.species = "Fox"
+			e.small = true
 		add_child(e)
 		e.setup(terrain, p, player)
 		_register_critter(e)
@@ -1511,7 +1518,7 @@ func _nearest_critter() -> String:
 			bd = d
 			# 用脚本资源判断种类：kangaroo.gd / emu.gd 都没有 class_name，不能用 is
 			var sp: String = h.get_script().resource_path if h.get_script() != null else ""
-			best = "袋鼠" if sp.ends_with("kangaroo.gd") else "鸸鹋"
+			best = str(h.get_meta("species_name", "袋鼠" if sp.ends_with("kangaroo.gd") else "鸸鹋"))
 	return best
 
 

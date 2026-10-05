@@ -43,7 +43,8 @@ func _ready() -> void:
 	print("FLORA_RNG_STATE=%d" % rng.state)
 	for i in nodes.size():
 		var node: Node3D = nodes[i]
-		_ok(node.find_children("AssetVisual*", "Node3D", true, false).size() > 0 if installed else node.find_children("AssetVisual*", "Node3D", true, false).is_empty(), "自然物%d外观切换" % i)
+		var expects_asset := installed or preload("res://scripts/nature_assets.gd").enabled()
+		_ok(node.find_children("AssetVisual*", "Node3D", true, false).size() > 0 if expects_asset else node.find_children("AssetVisual*", "Node3D", true, false).is_empty(), "自然物%d外观切换" % i)
 		_ok(is_equal_approx(float(node.get_meta("collide_radius")), native_radii[i]), "自然物%d占地不变" % i)
 		node.free()
 	var fence := PropsS.make_fence(4.6)
@@ -83,7 +84,7 @@ func _ready() -> void:
 		_ok(space.node.find_children("*", "StaticBody3D", true, false).size() == 1, space.kind + "家具没有另加碰撞体")
 	main.terrain.apply_season_tint(Color(0.8, 0.9, 1.0), 1.0)
 	var grass: Material = main.terrain.tintables[0]
-	_ok(grass is ShaderMaterial if installed else grass is StandardMaterial3D, "草丛风动材质与缺包回退")
+	_ok(grass is ShaderMaterial if installed or preload("res://scripts/nature_assets.gd").enabled() else grass is StandardMaterial3D, "草丛风动材质与缺包回退")
 	_ok(bool(main.terrain.ground_mi.material_override.get_shader_parameter("use_asset_ground")) == installed, "地面贴图按安装状态启用")
 	print("CATALOG_TRIANGLES=%d LOAD_MS=%.1f" % [triangles, (Time.get_ticks_usec() - started) / 1000.0])
 	# 同步执行固定数量断言；中途脚本错误不会伪装成全绿。

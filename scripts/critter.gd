@@ -18,6 +18,7 @@ var target := Vector2.ZERO
 var timer := 0.0
 var hop_t := -1.0
 var model: Node3D
+var continuous_gait := false
 
 
 func setup(terr: Node3D, pos2: Vector2, pl: Node3D) -> void:
@@ -63,7 +64,8 @@ func _process(dt: float) -> void:
 		hop_t += dt
 		if hop_t > interval:
 			hop_t -= interval
-		var boost := 1.0 + sin(hop_t / interval * PI) * 1.7
+		# 四足模型靠骨骼步态行走；沿用袋鼠的冲刺脉冲会让脚步和实际速度不断错开。
+		var boost := 1.0 if continuous_gait else 1.0 + sin(hop_t / interval * PI) * 1.7
 		p.x += dir.x * sp * boost * dt
 		p.z += dir.y * sp * boost * dt
 		rotation.y = lerp_angle(rotation.y, atan2(dir.x, dir.y), 0.16)

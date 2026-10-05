@@ -1,0 +1,4 @@
+Ultimate Animated Animals by Quaternius
+https://quaternius.com/packs/ultimateanimatedanimals.html
+CC0 1.0 Universal. https://creativecommons.org/publicdomain/zero/1.0/
+Deer, Stag, Fox. Original glTF converted to Godot scenes; materials shared.

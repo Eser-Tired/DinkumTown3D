@@ -204,6 +204,7 @@ func _run() -> void:
 	# 放宽到 0.45 的话收敛慢一半也能蒙混过去。
 	await get_tree().create_timer(1.8).timeout
 	_ok(player.swimming, "湖心进入游泳状态")
+	_ok((player.model.basis * Vector3.UP).dot(player.facing()) > 0.2, "游泳时头部向身体前方倾斜，避免骨骼人物变成仰泳")
 	var y_float: float = player.global_position.y
 	_ok(absf(y_float - flt) < 0.30,
 		"漂在水面附近（实得 %.2f，期望 ≈ %.2f，差 %.2f）" % [y_float, flt, absf(y_float - flt)])

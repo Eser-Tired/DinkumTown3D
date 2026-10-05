@@ -60,6 +60,7 @@ var cam_yaw: Node3D
 var cam_pitch: Node3D
 var cam: Camera3D
 var model: Node3D
+var rig := preload("res://scripts/rigged_visual.gd").new()
 
 # —— 战斗（近战）——
 const WeaponsS := preload("res://scripts/weapons.gd")
@@ -97,6 +98,16 @@ func _ready() -> void:
 	cam_pitch.add_child(cam)
 
 	_build_model()
+	if rig.attach(model, "res://assets/characters/Adventurer.scn", 1.82):
+		for child in model.get_children():
+			if child != rig.root:
+				_hide_native_meshes(child)
+
+func _hide_native_meshes(node: Node) -> void:
+	if node is MeshInstance3D:
+		node.layers = 0
+	for child in node.get_children():
+		_hide_native_meshes(child)
 
 
 func setup(terr: Node3D, obs: Array, spawn2: Vector2) -> void:
@@ -359,9 +370,10 @@ func _physics_process(dt: float) -> void:
 			la.rotation.x = s * 0.42
 		if lb:
 			lb.rotation.x = -s * 0.42
-		# 前倾角度：-0.5 rad ≈ 29°（漂着划水），-0.95 rad ≈ 54°（下潜时几乎趴平）。
+		# 本游戏人物朝 +Z；绕 X 的正角才让头朝 +Z 前倾。负号会让新骨骼像仰泳。
+		# 0.5 rad ≈ 29°（漂着划水），0.95 rad ≈ 54°（下潜时几乎趴平）。
 		# 角度太小会像"站在水里"，太大又会变成游泳运动员那种水平姿态，低多边形角色撑不住。
-		model.rotation.x = lerpf(model.rotation.x, -0.95 if diving else -0.5, 0.09)
+		model.rotation.x = lerpf(model.rotation.x, 0.95 if diving else 0.5, 0.09)
 	else:
 		model.rotation.x = lerpf(model.rotation.x, 0.0, 0.15)
 		if dir.length() > 0.01:
@@ -406,6 +418,7 @@ func _physics_process(dt: float) -> void:
 
 	# —— 战斗冷却与挥砍动画 ——
 	_update_combat(dt)
+	rig.update_player(self, dt, dir.length() > 0.01, running)
 
 
 func _dry_support() -> bool:

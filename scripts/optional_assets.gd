@@ -52,6 +52,15 @@ static func fitted(kind: String, size: Vector3, center := Vector3.ZERO, quarter_
 static func cover_mesh(mi: MeshInstance3D, kind: String) -> void:
 	var box := mi.mesh.get_aabb()
 	var model := fitted(kind, box.size, box.get_center())
+	if kind in ["rock", "rock_alt"]:
+		var nature := preload("res://scripts/nature_assets.gd").instantiate("Rock_Medium_2" if kind == "rock_alt" else "Rock_Medium_1")
+		if nature != null:
+			if model != null:
+				model.free()
+			model = nature
+			var bounds: AABB = model.get_meta("source_bounds")
+			model.scale = box.size / bounds.size
+			model.position = box.get_center() - bounds.get_center() * model.scale
 	if model != null:
 		# visible=false 会连带隐藏新模型；layers=0 只隐藏原网格，仍保留它生成的简化碰撞。
 		for child in mi.get_children():
