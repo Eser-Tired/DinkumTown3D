@@ -1,5 +1,6 @@
 extends CanvasLayer
 class_name SleepPanel
+const U := preload("res://scripts/ui_layout.gd")
 ## 睡觉面板 —— 选睡到几点起床
 ##
 ## 【为什么 layer = 35】要在背包(30)之上、暂停菜单(40)之下：
@@ -48,6 +49,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	visible = false
 	_build()
+	U.bind(self, _apply_scale)
 
 
 func _build() -> void:
@@ -144,15 +146,15 @@ func _apply_scale() -> void:
 	var vs := get_viewport().get_visible_rect().size
 	if vs.x < 8.0 or vs.y < 8.0:
 		return
-	var k := clampf(minf(vs.x, vs.y) / 810.0, 0.85, 1.8)
+	var k := U.menu_scale(vs)
 	_main_box.add_theme_constant_override("separation", int(BASE_SEP * k))
-	_title.add_theme_font_size_override("font_size", maxi(20, int(BASE_TITLE_FONT * k)))
-	_sub.add_theme_font_size_override("font_size", maxi(11, int(BASE_SUB_FONT * k)))
+	_title.add_theme_font_size_override("font_size", U.text_size(BASE_TITLE_FONT, k, 20))
+	_sub.add_theme_font_size_override("font_size", U.text_size(BASE_SUB_FONT, k, 11))
 	for b in _all_btns:
 		if not is_instance_valid(b):
 			continue
 		(b as Button).custom_minimum_size = BASE_BTN * k
-		(b as Button).add_theme_font_size_override("font_size", maxi(13, int(BASE_BTN_FONT * k)))
+		(b as Button).add_theme_font_size_override("font_size", U.text_size(BASE_BTN_FONT, k, 13))
 
 
 ## hour_fn 由宿主注入：返回当前时刻（小时）。每次 open 都重新注入，

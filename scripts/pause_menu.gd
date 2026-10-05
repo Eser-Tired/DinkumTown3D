@@ -1,5 +1,6 @@
 extends CanvasLayer
 class_name PauseMenu
+const U := preload("res://scripts/ui_layout.gd")
 ## 游戏内暂停菜单 —— Esc / 系统返回键唤起，含：继续游戏、读取存档、设置、退出游戏
 ##
 ## 【为什么 layer = 40】必须盖住背包(30)、触控层(20)、HUD(10)。
@@ -54,6 +55,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	visible = false
 	_build()
+	U.bind(self, _apply_scale)
 
 
 # ——————————————— 构建 ———————————————
@@ -182,18 +184,18 @@ func _apply_scale() -> void:
 	if vs.x < 8.0 or vs.y < 8.0:
 		return
 	# 取短边：横竖屏都能得到同一套观感，且不会让窄边塞不下
-	var k := clampf(minf(vs.x, vs.y) / 810.0, 0.85, 1.8)
+	var k := U.menu_scale(vs)
 	_main_box.add_theme_constant_override("separation", int(BASE_SEP * k))
 	if _title_label != null:
-		_title_label.add_theme_font_size_override("font_size", maxi(20, int(BASE_TITLE_FONT * k)))
+		_title_label.add_theme_font_size_override("font_size", U.text_size(BASE_TITLE_FONT, k, 20))
 	if _tip_label != null:
-		_tip_label.add_theme_font_size_override("font_size", maxi(11, int(BASE_TIP_FONT * k)))
+		_tip_label.add_theme_font_size_override("font_size", U.text_size(BASE_TIP_FONT, k, 11))
 	for b in _main_btns:
 		if not is_instance_valid(b):
 			continue
 		var btn: Button = b
 		btn.custom_minimum_size = BASE_BTN * k
-		btn.add_theme_font_size_override("font_size", maxi(13, int(BASE_BTN_FONT * k)))
+		btn.add_theme_font_size_override("font_size", U.text_size(BASE_BTN_FONT, k, 13))
 	# 子面板与主菜单共用，缩放要一起传下去，否则点进设置会突然变小
 	if _slots != null:
 		_slots.set_ui_scale(k)

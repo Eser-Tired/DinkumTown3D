@@ -1,5 +1,6 @@
 extends Control
 class_name SettingsPanel
+const U := preload("res://scripts/ui_layout.gd")
 ## 设置面板 —— 主界面与游戏内暂停菜单共用同一份
 ##
 ## 【为什么要抽成独立类】设置项要落盘到 user://settings.cfg。两个菜单如果各写一份
@@ -78,6 +79,11 @@ func _ready() -> void:
 	add_child(_center)
 	_build()
 	load_settings()
+	U.bind(self, _resize)
+
+
+func _resize() -> void:
+	set_ui_scale(U.menu_scale(get_viewport().get_visible_rect().size))
 
 
 # ——————————————— 构建 ———————————————
@@ -316,26 +322,27 @@ func set_ui_scale(k: float) -> void:
 		_box.add_theme_constant_override("separation", int(BASE_SEP * k))
 		_box.custom_minimum_size = Vector2(BASE_BOX_W * k, 0.0)
 	if _title != null:
-		_title.add_theme_font_size_override("font_size", maxi(18, int(BASE_TITLE_FONT * k)))
+		_title.add_theme_font_size_override("font_size", U.text_size(BASE_TITLE_FONT, k, 18))
 	if _note != null:
-		_note.add_theme_font_size_override("font_size", maxi(11, int(BASE_TIP_FONT * k)))
+		_note.add_theme_font_size_override("font_size", U.text_size(BASE_TIP_FONT, k, 11))
 	if _vol_slider != null:
 		_vol_slider.custom_minimum_size = BASE_SLIDER_W * k
 	if _quality_option != null:
 		_quality_option.custom_minimum_size = BASE_OPTION_W * k
-		_quality_option.add_theme_font_size_override("font_size", maxi(12, int(BASE_ROW_FONT * k)))
+		_quality_option.add_theme_font_size_override("font_size", U.text_size(BASE_ROW_FONT, k, 12))
+		_quality_option.get_popup().add_theme_font_size_override("font_size", U.text_size(BASE_ROW_FONT, k))
 	if _vol_value != null:
-		_vol_value.add_theme_font_size_override("font_size", maxi(12, int(BASE_SMALL_FONT * k)))
+		_vol_value.add_theme_font_size_override("font_size", U.text_size(BASE_SMALL_FONT, k, 12))
 	if _fs_check != null:
-		_fs_check.add_theme_font_size_override("font_size", maxi(12, int(BASE_SMALL_FONT * k)))
+		_fs_check.add_theme_font_size_override("font_size", U.text_size(BASE_SMALL_FONT, k, 12))
 	for l in _row_labels:
 		if is_instance_valid(l):
 			var lb: Label = l
 			lb.custom_minimum_size = Vector2(BASE_ROW_LABEL_W * k, 0.0)
-			lb.add_theme_font_size_override("font_size", maxi(12, int(BASE_ROW_FONT * k)))
+			lb.add_theme_font_size_override("font_size", U.text_size(BASE_ROW_FONT, k, 12))
 	if _reset_btn != null:
 		_reset_btn.custom_minimum_size = BASE_BTN_SMALL * k
-		_reset_btn.add_theme_font_size_override("font_size", maxi(13, int(BASE_BTN_FONT * k)))
+		_reset_btn.add_theme_font_size_override("font_size", U.text_size(BASE_BTN_FONT, k, 13))
 	if _back_btn != null:
 		_back_btn.custom_minimum_size = BASE_BTN_SMALL * k
-		_back_btn.add_theme_font_size_override("font_size", maxi(13, int(BASE_BTN_FONT * k)))
+		_back_btn.add_theme_font_size_override("font_size", U.text_size(BASE_BTN_FONT, k, 13))

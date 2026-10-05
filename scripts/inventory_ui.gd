@@ -1,5 +1,6 @@
 extends CanvasLayer
 class_name InventoryUI
+const U := preload("res://scripts/ui_layout.gd")
 ## 背包界面 —— 资源概览 / 武器装备 / 进度统计
 ##
 ## 【为什么 layer = 30】
@@ -24,7 +25,7 @@ const RES_ORDER := ["wood", "stone", "fiber", "ore", "food"]
 const PANEL_W := 640.0
 const PANEL_H := 452.0
 const CELL_W := 176.0
-const CELL_H := 66.0
+const CELL_H := 82.0 # 粗体名称与数量是两行，按字体实际行高留足空间。
 const CELL_GAP := 12.0
 const COLS := 3
 
@@ -51,6 +52,7 @@ func _ready() -> void:
 	name = "InventoryUI"
 	visible = false
 	_build()
+	U.bind(self, _layout)
 
 
 ## 由 main 注入数据源，避免背包反向依赖 main 的内部结构
@@ -112,7 +114,7 @@ func _panel(c: Color) -> Panel:
 
 func _label(fs: int, c: Color) -> Label:
 	var l := Label.new()
-	l.add_theme_font_size_override("font_size", maxi(10, int(fs * _k)))
+	l.add_theme_font_size_override("font_size", U.text_size(fs, _k, 10))
 	l.add_theme_color_override("font_color", c)
 	l.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
 	l.add_theme_constant_override("shadow_offset_y", 1)
@@ -123,7 +125,7 @@ func _button(text: String) -> Button:
 	var b := Button.new()
 	b.text = text
 	b.focus_mode = Control.FOCUS_NONE
-	b.add_theme_font_size_override("font_size", maxi(10, int(17 * _k)))
+	b.add_theme_font_size_override("font_size", U.text_size(17, _k, 10))
 	b.add_theme_color_override("font_color", Color(1, 1, 1, 0.96))
 	return b
 
@@ -133,13 +135,9 @@ func _button(text: String) -> Button:
 func _layout() -> void:
 	var vs := get_viewport().get_visible_rect().size
 	_vs = vs
-	# 【为什么这里不用 0.60 下限】背包是纯阅读界面，没有"按钮太小按不准"的问题，
-	# 面板缩到 384x271（竖屏 0.60 时）文字只剩 10~12px，完全没法看。
-	# 这里改用短边独立算：竖屏 1080x2340 -> k = 1080/810 = 1.33，面板够大够读；
-	# 横屏 1440x810 -> k = 1.0，与桌面观感一致。再宽也不超过 1.6，避免占满屏。
-	_k = clampf(minf(vs.x / 1440.0, vs.y / 810.0), 0.60, 2.2)
-	var kd := clampf(minf(vs.x / 900.0, vs.y / 700.0), 0.0, 1.6)
-	var k := maxf(_k, kd * 0.75)
+	# 阅读面板按短边放大，并受自身宽高限制，避免套用触控几何比例后文字太小。
+	_k = U.menu_scale(vs, Vector2(PANEL_W, PANEL_H))
+	var k := _k
 
 	_bg.position = Vector2.ZERO
 	_bg.size = vs
@@ -155,13 +153,13 @@ func _layout() -> void:
 	var py := by + 16.0 * k
 	var inner := bw - 44.0 * k
 
+	_title.add_theme_font_size_override("font_size", U.text_size(26, k, 12))
 	_title.position = Vector2(px, py)
 	_title.size = Vector2(inner * 0.6, 34.0 * k)
-	_title.add_theme_font_size_override("font_size", maxi(12, int(26 * k)))
 
+	_close.add_theme_font_size_override("font_size", U.text_size(17, k, 10))
 	_close.size = Vector2(96.0 * k, 38.0 * k)
 	_close.position = Vector2(bx + bw - 22.0 * k - _close.size.x, py - 2.0 * k)
-	_close.add_theme_font_size_override("font_size", maxi(10, int(17 * k)))
 
 	# —— 资源格子 ——
 	var gy := py + 48.0 * k
@@ -175,9 +173,9 @@ func _layout() -> void:
 		p.position = Vector2(cx, cy)
 		p.size = Vector2(CELL_W * k, CELL_H * k)
 		var l: Label = c.label
+		l.add_theme_font_size_override("font_size", U.text_size(19, k, 11))
 		l.position = Vector2(cx, cy + 14.0 * k)
 		l.size = Vector2(CELL_W * k, CELL_H * k - 20.0 * k)
-		l.add_theme_font_size_override("font_size", maxi(11, int(19 * k)))
 
 	# —— 武器区 ——
 	var wy := gy + 2.0 * (CELL_H + CELL_GAP) * k + 18.0 * k
@@ -185,15 +183,16 @@ func _layout() -> void:
 	for i in _weapon_btns.size():
 		var e: Dictionary = _weapon_btns[i]
 		var b: Button = e.btn
+		b.add_theme_font_size_override("font_size", U.text_size(17, k, 11))
 		b.size = Vector2(inner, 46.0 * k)
 		b.position = Vector2(wrow.x, wrow.y + i * (46.0 + 10.0) * k)
-		b.add_theme_font_size_override("font_size", maxi(11, int(17 * k)))
 
 	# —— 统计 ——
-	var sy := by + bh - 44.0 * k
+	_stat.add_theme_font_size_override("font_size", U.text_size(16, k, 10))
+	_stat.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var sy := by + bh - 58.0 * k
 	_stat.position = Vector2(px, sy)
-	_stat.size = Vector2(inner, 30.0 * k)
-	_stat.add_theme_font_size_override("font_size", maxi(10, int(16 * k)))
+	_stat.size = Vector2(inner, 48.0 * k)
 
 
 # ——————————————— 开关 ———————————————

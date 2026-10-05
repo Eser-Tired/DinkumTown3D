@@ -1,5 +1,6 @@
 extends CanvasLayer
 class_name TouchControls
+const U := preload("res://scripts/ui_layout.gd")
 ## 移动端触控层 —— 左摇杆（位置可拖）/ 底部物品栏 / 右侧动作键 / 点击交互
 ##
 ## 【布局分区】
@@ -146,6 +147,7 @@ func _rebuild() -> void:
 	# 竖屏与平板（高度 ≥ 720）走原来的 0.60，完全不受影响。
 	var k_floor := 0.42 if _vs.y < 520.0 else 0.60
 	_k = clampf(minf(_vs.x / REF.x, _vs.y / REF.y), k_floor, 2.2)
+	_k_text_geo = U.text_scale(_vs)
 	var W := _vs.x
 	var H := _vs.y
 	var k := _k
@@ -227,7 +229,8 @@ func _rebuild() -> void:
 func _btn_at(text: String, action: String, cx: float, cy: float, w: float, h: float, fs: int) -> Button:
 	var b := Button.new()
 	b.text = text
-	b.add_theme_font_size_override("font_size", maxi(10, int(fs * _k)))
+	U.bold(b)
+	b.add_theme_font_size_override("font_size", U.fit_text(text, fs, _k_text_geo, Vector2(w, h), 12.0 * _k))
 	var sz := Vector2(w, h)
 	b.focus_mode = Control.FOCUS_NONE
 	_style(b, Color(0.10, 0.14, 0.20, 0.52), Color(0.18, 0.27, 0.38, 0.80))
@@ -260,7 +263,8 @@ func _make_hold_button(text: String, action: String, cx: float, cy: float,
 		w: float, h: float, fs: int) -> Button:
 	var b := Button.new()
 	b.text = text
-	b.add_theme_font_size_override("font_size", maxi(10, int(fs * _k)))
+	U.bold(b)
+	b.add_theme_font_size_override("font_size", U.fit_text(text, fs, _k_text_geo, Vector2(w, h), 12.0 * _k))
 	var sz := Vector2(w, h)
 	b.focus_mode = Control.FOCUS_NONE
 	_style(b, Color(0.12, 0.20, 0.30, 0.54), Color(0.24, 0.44, 0.60, 0.86))
@@ -287,6 +291,7 @@ func _set_hold(action: String, on: bool) -> void:
 
 
 func _style(b: Button, normal: Color, pressed: Color) -> void:
+	U.bold(b)
 	var n := StyleBoxFlat.new()
 	n.bg_color = normal
 	n.set_corner_radius_all(int(16 * _k))
@@ -327,7 +332,7 @@ func _make_hotbar_cell(i: int, x: float, y: float, w: float, h: float) -> void:
 	b.focus_mode = Control.FOCUS_NONE
 	b.size = Vector2(w, h)
 	b.position = Vector2(x, y)
-	b.add_theme_font_size_override("font_size", maxi(10, int(16 * _k)))
+	b.add_theme_font_size_override("font_size", U.text_size(16, _k, 10))
 	var idx := i
 	b.pressed.connect(func(): GameBus.request_touch_action("hot%d" % (idx + 1)))
 	add_child(b)
@@ -350,6 +355,7 @@ func _refresh_hotbar() -> void:
 				_style(b, Color(0.62, 0.44, 0.16, 0.86), Color(0.78, 0.58, 0.24, 0.95))
 			else:
 				_style(b, Color(0.10, 0.14, 0.20, 0.58), Color(0.18, 0.27, 0.38, 0.82))
+		b.add_theme_font_size_override("font_size", U.fit_text(b.text, 16, _k_text_geo, b.size, 8.0 * _k))
 
 
 # ——————————————— 输入 ———————————————

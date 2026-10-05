@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dinkum Town · UI 分辨率适配验收</title>
+<style>
+:root{color-scheme:light dark;--bg:#f7f5ef;--panel:#fff;--text:#252d35;--muted:#586572;--line:#d8dee4;--accent:#815623}
+@media(prefers-color-scheme:dark){:root{--bg:#151b24;--panel:#202a36;--text:#f1eee7;--muted:#bdc8d4;--line:#394757;--accent:#edc284}}
+html[data-theme="light"]{color-scheme:light;--bg:#f7f5ef;--panel:#fff;--text:#252d35;--muted:#586572;--line:#d8dee4;--accent:#815623}
+html[data-theme="dark"]{color-scheme:dark;--bg:#151b24;--panel:#202a36;--text:#f1eee7;--muted:#bdc8d4;--line:#394757;--accent:#edc284}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:17px/1.7 "Microsoft YaHei",sans-serif}main{max-width:1160px;margin:auto;padding:65px 24px}h1{font-size:32px;line-height:1.4}h2{font-size:23px;margin-top:38px}p{max-width:900px}button{position:fixed;right:20px;top:18px;border:1px solid var(--line);border-radius:8px;padding:8px 15px;background:var(--panel);color:var(--text);cursor:pointer;font-family:inherit;font-weight:700;font-size:15px}strong{color:var(--accent)}.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px}.gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.wide{grid-column:1/-1}figure{margin:0}img{display:block;width:100%;height:auto;border-radius:8px}figcaption{padding:9px 0;color:var(--muted);font-size:15px}table{width:100%;border-collapse:collapse}td,th{padding:10px;text-align:left;border-bottom:1px solid var(--line)}code{font:15px/1.6 Consolas,monospace}.note{color:var(--muted);font-size:15px}@media(max-width:700px){.gallery{grid-template-columns:1fr}.wide{grid-column:auto}main{padding:62px 16px}h1{font-size:25px}}
+</style>
+</head>
+<body>
+<button id="theme" type="button" aria-label="切换浅色或深色主题">切换主题</button>
+<main>
+<h1>UI 文字与位置随分辨率调整</h1>
+<p>HUD、触控按钮、背包、主菜单、暂停、设置、存档和睡觉面板共用字体缩放规则。文字使用<strong>字重 700 的系统粗体</strong>，按屏幕短边放大；菜单同时受可用宽高限制。窗口缩放或横竖屏切换会实时重排，暂停时也会更新。</p>
+<div class="card"><strong>1907 项 UI 断言通过 · 9 种触控分辨率 bad=0</strong><p>验证真实字体宽高、屏幕边界、资源文字在背景内、背包文字在格子内、长提示与建造菜单避让触控按钮，以及打开设置后旋转屏幕。游戏回归：物理 23/23、战斗 102/102、水域 37/37；室内与端到端检查均为 fails=0。</p></div>
+<h2>实际游戏截图</h2>
+<div class="gallery">
+<figure class="wide"><a href="shots/ui_landscape.png"><img src="shots/ui_landscape.png" alt="1440×810 横屏触控界面：粗体资源与时钟，提示和按钮留出间隔"></a><figcaption>1440×810 横屏：HUD 贴屏幕边缘，触控按钮和提示各有空间。</figcaption></figure>
+<figure><a href="shots/ui_portrait.png"><img src="shots/ui_portrait.png" alt="720×1280 竖屏建造界面"></a><figcaption>720×1280 竖屏建造：菜单移到资源栏下方，长提示在动作键旁换行。</figcaption></figure>
+<figure><a href="shots/ui_bag.png"><img src="shots/ui_bag.png" alt="720×1280 竖屏背包"></a><figcaption>竖屏背包：面板居中，两行资源文字留足行高。</figcaption></figure>
+<figure><a href="shots/ui_menu.png"><img src="shots/ui_menu.png" alt="720×1280 竖屏主菜单"></a><figcaption>竖屏主菜单：标题按可用宽度缩放，按钮保持居中。</figcaption></figure>
+</div>
+<h2>实测字号</h2>
+<p>以资源栏为例，字号依据短边变化；窗口越大，文字越大。</p>
+<div class="card"><table><thead><tr><th>分辨率</th><th>资源栏字号</th><th>字体字重</th></tr></thead><tbody>
+<tr><td>1280×720 / 720×1280</td><td>19px</td><td>700</td></tr>
+<tr><td>1440×810 / 810×1440</td><td>22px</td><td>700</td></tr>
+<tr><td>1920×1080 / 1080×1920</td><td>29px</td><td>700</td></tr>
+<tr><td>2560×1440 / 1440×2560</td><td>39px</td><td>700</td></tr>
+<tr><td>3840×2160</td><td>58px</td><td>700</td></tr>
+</tbody></table></div>
+<h2>复查入口</h2>
+<p><code>tools/ui_check.tscn</code> 检查动态布局与字体；<code>tools/touch_layout_check.tscn</code> 检查触控占位；<code>tools/ui_shot.tscn</code> 在真实渲染窗口中生成横竖屏截图。截图脚本不能用 headless。</p>
+<p class="note">2026-10-05 · Godot 4.7.2 · Windows / RTX 5060 Laptop。测试使用隔离项目副本和固定地图种子 20260921；截图已人工核对。手机实机尚未验证，系统字体按设备可用字体回退。</p>
+</main>
+<script>
+const remembered=localStorage.getItem('ui-report-theme');if(remembered==='dark'||remembered==='light')document.documentElement.dataset.theme=remembered;
+document.getElementById('theme').addEventListener('click',()=>{const current=document.documentElement.dataset.theme||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');const next=current==='dark'?'light':'dark';document.documentElement.dataset.theme=next;localStorage.setItem('ui-report-theme',next)});
+</script>
+</body>
+</html>

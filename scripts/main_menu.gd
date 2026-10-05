@@ -1,4 +1,5 @@
 extends Control
+const U := preload("res://scripts/ui_layout.gd")
 ## 主界面 —— 标题 + 四个菜单项 + 存档列表 + 设置
 ##
 ## 【背景实现】WorldBG 是 SubViewportContainer，内含一个精简 3D 世界（MenuWorld）。
@@ -56,6 +57,7 @@ func _ready() -> void:
 		_slots.set_save_system(_save)
 
 	_show_panel("main")
+	U.bind(self, _resize_ui)
 	_check_auto_shot()
 
 
@@ -313,13 +315,37 @@ func _show_panel(name: String) -> void:
 		_settings.refresh()
 
 
-## 主界面的分辨率缩放：与暂停菜单同一套算法（短边 / 810，夹在 0.85~1.8）。
-## 手机上按 1440x810 定死的 54px 按钮只有屏高的 5%，点不准。
+## 与暂停菜单共用短边缩放，并用可用宽高限制面板，避免窄屏上的大字越界。
 func _ui_scale() -> float:
 	var vs := get_viewport().get_visible_rect().size
 	if vs.x < 8.0 or vs.y < 8.0:
 		return 1.0
-	return clampf(minf(vs.x, vs.y) / 810.0, 0.85, 1.8)
+	return U.menu_scale(vs)
+
+
+func _resize_ui() -> void:
+	var vs := get_viewport().get_visible_rect().size
+	if vs.x < 8 or vs.y < 8:
+		return
+	var k := _ui_scale()
+	var title: Label = _title_box.get_child(0)
+	var subtitle: Label = _title_box.get_child(1)
+	var fs := U.fit_text(title.text, 88, U.text_scale(vs), Vector2(vs.x * 0.88, vs.y * 0.2), 0)
+	title.add_theme_font_size_override("font_size", fs)
+	subtitle.add_theme_font_size_override("font_size", U.text_size(22, k))
+	_title_box.offset_top = vs.y * 0.075
+	_title_box.offset_bottom = _title_box.offset_top + U.font().get_height(fs) * 1.6
+	_menu_box.custom_minimum_size.x = 340.0 * k
+	_menu_box.add_theme_constant_override("separation", int(14 * k))
+	_ver_label.add_theme_font_size_override("font_size", U.text_size(15, k))
+	_ver_label.offset_top = -U.font().get_height(U.text_size(15, k)) - 16.0 * k
+	_ver_label.offset_bottom = -16.0 * k
+	_toast.add_theme_font_size_override("font_size", U.text_size(18, k))
+	_toast.offset_top = -84.0 * k
+	_toast.offset_bottom = -40.0 * k
+	_slots.set_ui_scale(k)
+	_settings.set_ui_scale(k)
+	_rebuild_main_menu()
 
 
 func _rebuild_main_menu() -> void:
@@ -343,9 +369,10 @@ func _add_menu_button(text: String, cb: Callable, disabled := false) -> Button:
 	var k := _ui_scale()
 	var b := Button.new()
 	b.text = text
+	U.bold(b)
 	b.disabled = disabled
 	b.custom_minimum_size = Vector2(340.0, 54.0) * k
-	b.add_theme_font_size_override("font_size", maxi(14, int(24.0 * k)))
+	b.add_theme_font_size_override("font_size", U.text_size(24.0, k, 14))
 
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = C_BTN

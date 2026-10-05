@@ -1,5 +1,6 @@
 extends CanvasLayer
 class_name GameHUD
+const U := preload("res://scripts/ui_layout.gd")
 ## 界面：资源 / 时钟 / 交互提示 / 建造菜单 / 帮助
 
 var res_label: Label
@@ -12,6 +13,10 @@ var help_panel: Panel
 var toast_label: Label
 var weapon_label: Label
 var toast_t := 0.0
+var _touch_mode := false
+var _layout_args := Vector4.ZERO
+var _last_bottom := -1.0
+signal layout_changed(bottom: float)
 
 ## —— 水域 ——
 ## 水下遮罩：相机没入水面时压一层青绿，不用 Environment 雾是因为雾会影响
@@ -73,6 +78,17 @@ func _ready() -> void:
 	uw_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	uw_overlay.visible = false
 	add_child(uw_overlay)
+	U.bind(self, _resize)
+
+
+func _resize() -> void:
+	if _touch_mode:
+		return # 触控层会提供自己的几何尺寸和真实占位。
+	var vs := get_viewport().get_visible_rect().size
+	if vs.x < 8 or vs.y < 8:
+		return
+	var k := clampf(minf(vs.x / 1440.0, vs.y / 810.0), 0.5, 3.2)
+	_arrange(vs.x, vs.y, k, U.text_scale(vs), false)
 
 
 ## 相机是否在水面以下 —— 只负责开关那一层青绿遮罩
@@ -90,6 +106,7 @@ func set_breath(v: float) -> void:
 		breath_panel.visible = show
 		breath_fill.visible = show
 		_breath_shown = show
+		_refresh_layout()
 	if not show:
 		return
 	breath_fill.size = Vector2(maxf(0.0, _breath_full_w * clampf(v, 0.0, 1.0)),
@@ -199,7 +216,7 @@ func _build() -> void:
 ## 【为什么要显式量】面板宽度如果只按常量算，换字体/换文案就会溢出；
 ## 实测宽度才是唯一可靠依据。没字体时返回一个保守估计，保证自检不崩。
 func _text_width(s: String, fs: int) -> float:
-	var f: Font = ThemeDB.fallback_font
+	var f: Font = U.font()
 	if f == null:
 		return float(s.length()) * float(fs) * 1.05
 	return f.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
@@ -216,8 +233,9 @@ func _text_width(s: String, fs: int) -> float:
 ## k_text —— 文字缩放，主调方会给一个不低于 k 的下界，防止竖屏下字小到读不了
 ## 返回值 —— 右侧竖列（时钟/季节/武器）的真实底边 y，触控层据此排系统小钮
 func set_touch_mode(w: float, h: float, k: float, k_text: float = -1.0) -> float:
+	_touch_mode = true
 	if k_text < 0.0:
-		k_text = k
+		k_text = U.text_scale(Vector2(w, h))
 	help_label.text = (
 		"左下摇杆移动，推满自动奔跑（长按可拖动重新定位）\n"
 		+ "屏幕空白处拖动转视角，双指捏合缩放\n"
@@ -229,78 +247,92 @@ func set_touch_mode(w: float, h: float, k: float, k_text: float = -1.0) -> float
 		+ "\n背包里可点武器直接装备，再点背包键或 Esc 关闭\n"
 		+ "系统返回键 / 左上「菜单」唤出暂停菜单（会停下时间与天气）"
 	)
-	show_help_panel(false)
+	help_panel.visible = false
+	help_label.visible = false
+	return _arrange(w, h, k, k_text, true)
 
-	# —— 右侧竖列：整体缩放到 k，贴右上 ——
-	# 三块高度 62 / 40 / 40，块间距 6；文字标签比面板再多探出约 12k。
-	# 整列底部（含标签）≈ 16 + 62+6 + 40+6 + 40+12 = 182k。
-	# 触控层的系统按钮从 210k 起，两边不许越界——这个数字是跨文件的约定，
-	# 改动右边任何一处都要同步检查 touch_controls.gd 的 SYS_ROW_Y。
+
+func _arrange(w: float, h: float, k: float, kt: float, touch: bool) -> float:
+	_layout_args = Vector4(w, h, k, kt)
+
+	# 粗体的实际宽高决定右侧保留区；触控层收到 layout_changed 后自动下移系统键。
+	# 几何比例 k 与文字比例 kt 分开，窄屏可以保留操作空间，同时维持可读字号。
 	const PAD_TOP := 16.0
 	const PAD_X := 18.0
 	const PANEL_W := 226.0
 	const GAP := 6.0
-	# 【kt = 文字缩放，k = 几何缩放】几何可以缩得很小（留出操作空间），
-	# 但文字小于 ~14px 就没法读了。所以面板尺寸/坐标用 kt，字号用 kt ≥ k。
-	var kt := k_text
-	# 【宽度为什么要跟 k 走】右侧竖列上方是触控层从 248k 起的系统小钮。
-	# 竖屏下 kt（短边/810 = 1.33）远大于 k（0.75），宽度跟 kt 会让面板变胖、
-	# 整列下探把系统小钮压住。所以宽度用 k 锚定右边缘，避免漂移。
-	# 但字号用 kt 后文字会变宽（横屏实测「武器：斧头」超出 226k 面板约 12%），
-	# 所以再按最长文字实测兜一个下限，保证不溢出不越屏。
 	var sizes := [62.0, 40.0, 40.0]
 	var pw := PANEL_W * k
+	var labs := [clock_label, season_label, weapon_label]
 	for s in ["第 88 天  88:88", "秋 · 第 88 天 · 雷雨", "武器：长矛"]:
-		var need := _text_width(s, maxi(13, int((20 if s.begins_with("第") else 17) * kt))) + 28.0 * k
+		var need := _text_width(s, U.text_size(20 if s.begins_with("第") else 17, kt)) + 28.0 * k
 		pw = maxf(pw, need)
+	for i in labs.size():
+		pw = maxf(pw, _text_width(labs[i].text, U.text_size(20 if i == 0 else 17, kt)) + 28.0 * k)
 	pw = minf(pw, w * 0.5)
 	var px := w - PAD_X * k - pw
-	var labs := [clock_label, season_label, weapon_label]
 	var cy := PAD_TOP * kt
 	for i in _right_panels.size():
 		var p: Panel = _right_panels[i]
 		p.position = Vector2(px, cy)
 		# 面板高 = 几何高 + 字号增量，保证字号涨上去后文字不会顶出面板
-		var ph := maxf(sizes[i] * k, sizes[i] * kt - 6.0 * kt)
-		p.size = Vector2(pw, ph)
+		var fs := U.text_size(20 if i == 0 else 17, kt)
 		var l: Label = labs[i]
+		# 必须先更新字体再设置尺寸，旧字号的 minimum_size 会把缩小后的标签撑出屏幕。
+		l.add_theme_font_size_override("font_size", fs)
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		var text_h := U.font().get_multiline_string_size(l.text, HORIZONTAL_ALIGNMENT_LEFT, pw - 24.0 * k, fs).y
+		var ph := maxf(sizes[i] * k, maxf(text_h, U.font().get_height(fs)) + 16.0 * k)
+		p.size = Vector2(pw, ph)
 		l.position = Vector2(px + 12.0 * k, cy + 6.0 * k)
 		l.size = Vector2(pw - 24.0 * k, ph - 10.0 * k)
-		var fs := maxi(13, int((20 if i == 0 else 17) * kt))
-		l.add_theme_font_size_override("font_size", fs)
 		l.add_theme_constant_override("outline_size", 0)
 		l.clip_text = false
 		cy += ph + GAP * k
 
-	# —— 资源栏：按 kt 缩放，贴左上。高度必须放得下 5 行 ——
-	# 字号 19kt，Label 默认行高约 1.35 倍，5 行 ≈ 128kt；再加 20kt 上下边距。
-	var rh := 150.0 * kt
+	# Label 的主题行间距也占高度；只用 Font 行高会让第五行掉到面板外。
+	var res_fs := U.text_size(19.0, kt)
+	res_label.add_theme_font_size_override("font_size", res_fs)
+	var rh := maxf(U.font().get_height(res_fs) * 5.0, res_label.get_minimum_size().y) + 10.0 * kt + 12.0 * k
 	res_panel.position = Vector2(18.0 * kt, 16.0 * kt)
-	res_panel.size = Vector2(250.0 * kt, rh)
+	res_panel.size = Vector2(minf(250.0 * kt, w * 0.45), rh)
 	res_label.position = Vector2(34.0 * kt, 26.0 * kt)
-	res_label.size = Vector2(230.0 * kt, rh - 20.0 * kt)
-	res_label.add_theme_font_size_override("font_size", maxi(13, int(19.0 * kt)))
+	# 标签偏移随 kt 放大，左右留白也必须用 kt，不能拿触控的较小 k 去扣。
+	res_label.size = Vector2(res_panel.size.x - 32.0 * kt, rh - 10.0 * kt - 12.0 * k)
 
-	# —— 提示与建造菜单 ——
-	# 【为什么要抬到 232k】触控模式下底部物品栏顶边在 h-106k，格子高 88k；
-	# 提示行高 56k 落在 h-175k 时正好把第 3/4 格盖住（竖屏下实测）。
-	# 232k = 106k + 88k + 38k，留够间隔，同时仍在半屏以下不挡视野。
-	# 宽度用 560k（不是 kt）：右侧「跳 / 农事 / 使用」竖列在竖屏下会横向侵入，
-	# 用 kt 算宽度会把提示行撑到按钮底下。文字仍用 kt，靠水平居中和面板留白兜住。
+	# 提示宽度扣除动作按钮占位，按真实文字高度上移，避免压住快捷栏。
+	prompt_label.add_theme_font_size_override("font_size", U.text_size(20.0, kt, 13))
 	prompt_label.position = Vector2(w * 0.5 - 280.0 * k, h - 232.0 * k)
 	prompt_label.size = Vector2(560.0 * k, 56.0 * kt)
-	prompt_label.add_theme_font_size_override("font_size", maxi(13, int(20.0 * kt)))
+	# 窄屏提示允许换行；按可用宽度和最大三行高度居中，避开动作键与底栏。
+	prompt_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if touch:
+		prompt_label.position.x = 154.0 * k
+		prompt_label.size.x = maxf(120.0, w - 484.0 * k)
+	else:
+		prompt_label.size.x = minf(w - 40.0 * k, 680.0 * kt)
+		prompt_label.position = Vector2((w - prompt_label.size.x) * 0.5, h - 120.0 * kt)
+	var prompt_fs := U.text_size(20, kt)
+	prompt_label.size.y = maxf(U.font().get_height(prompt_fs),
+		U.font().get_multiline_string_size(prompt_label.text, HORIZONTAL_ALIGNMENT_LEFT, prompt_label.size.x, prompt_fs).y)
+	if touch:
+		prompt_label.position.y = h - 180.0 * k - prompt_label.size.y
 	var by := 16.0 * kt + rh + 12.0 * k
 	# 【为什么 x 不从 18k 起】左上角那一列现在是触控按钮的地盘：
 	# touch_controls.gd 的左侧竖排（菜单/背包/建造）占 x ∈ [58k, 142k]。
 	# 建造菜单贴着 18k 起会正好压在「菜单」按钮上，所以让它从竖排右侧开始。
 	# 154k = 58k(左距) + 84k(钮宽) + 12k(间隙)，改那边的 sx/sw 要同步改这里。
-	# 【为什么宽度用 330k 而不是 330kt】竖屏下 kt=1.33 会把宽度撑到 440，
-	# 直接钻进右上系统小钮的地盘；用 k 算（竖屏 810 宽 -> 330*0.6=198）刚好够。
+	# 字号随 kt 放大，但列表宽度必须扣除两侧触控按钮的几何占位。
+	build_label.add_theme_font_size_override("font_size", U.text_size(18.0, kt, 12))
 	build_label.position = Vector2(TOUCH_LEFT_COL_RIGHT * k, by)
-	build_label.size = Vector2(330.0 * k, 170.0 * kt)
-	build_label.add_theme_font_size_override("font_size", maxi(12, int(18.0 * kt)))
+	build_label.size = Vector2(minf(420.0 * kt, w - 514.0 * k), 170.0 * kt)
 	build_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	build_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if not touch:
+		build_label.size.x = minf(340.0 * kt, w * 0.45)
+		build_label.position = Vector2(w - build_label.size.x - 18.0 * k, cy + 24.0 * k)
+	build_label.size.y = maxf(U.font().get_height(U.text_size(18, kt)),
+		U.font().get_multiline_string_size(build_label.text, HORIZONTAL_ALIGNMENT_LEFT, build_label.size.x, U.text_size(18, kt)).y)
 
 	# —— 憋气条：贴屏幕顶部正中 ——
 	# 【为什么是顶部正中】左上被资源栏占着、右上被系统小钮占着、下方全是操作键，
@@ -315,50 +347,108 @@ func set_touch_mode(w: float, h: float, k: float, k_text: float = -1.0) -> float
 		# 满格宽度必须跟着缩放走：set_breath 用它算填充比例，
 		# 面板位置改了而这里没改的话，条子会一直按旧宽度画。
 		_breath_full_w = 312.0 * kt
+		# 顶部窄屏已被资源和时钟占用，将憋气条放到两列下方。
+		if w < 1000.0 * kt:
+			breath_panel.position.y = maxf(res_panel.position.y + rh, cy) + 16.0 * k
+			breath_fill.position = breath_panel.position + Vector2(pad, pad)
+			if breath_panel.visible:
+				build_label.position.y = maxf(build_label.position.y,
+					breath_panel.position.y + breath_panel.size.y + 12.0 * k)
+
+	var toast_fs := U.text_size(20, kt)
+	toast_label.add_theme_font_size_override("font_size", toast_fs)
+	toast_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	toast_label.size = Vector2(minf(w - 36.0 * k, 560.0 * kt), U.font().get_height(toast_fs) * 2.0)
+	toast_label.position = Vector2((w - toast_label.size.x) * 0.5, maxf(cy, res_panel.position.y + rh) + 20.0 * k)
+	if touch:
+		toast_label.position.x = 154.0 * k
+		toast_label.size.x = maxf(120.0, w - 484.0 * k)
+		if build_label.visible:
+			toast_label.position.y = maxf(toast_label.position.y, build_label.position.y + build_label.size.y + 18.0 * k)
+	var help_fs := U.text_size(16, kt)
+	help_label.add_theme_font_size_override("font_size", help_fs)
+	help_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var hw := minf(680.0 * kt, w * 0.44)
+	# Label 自身还有主题行间距；先设置换行宽度，再读真实最小高度，不能只量 Font。
+	help_label.size.x = hw - 24.0 * k
+	var hh := minf(help_label.get_minimum_size().y + 24.0 * k, h * 0.65)
+	help_panel.size = Vector2(hw, hh)
+	help_panel.position = Vector2(18.0 * k, h - hh - 18.0 * k)
+	help_label.position = help_panel.position + Vector2(12, 10) * k
+	help_label.size = help_panel.size - Vector2(24, 20) * k
+	if not touch and help_panel.visible:
+		prompt_label.position.x = help_panel.position.x + hw + 12.0 * k
+		prompt_label.size.x = w - prompt_label.position.x - 18.0 * k
+	if not is_equal_approx(cy, _last_bottom):
+		_last_bottom = cy
+		layout_changed.emit(cy)
 
 	return cy
+
+
+func _refresh_layout() -> void:
+	if _layout_args.x > 0:
+		_arrange(_layout_args.x, _layout_args.y, _layout_args.z, _layout_args.w, _touch_mode)
 
 
 func show_help_panel(on: bool) -> void:
 	help_panel.visible = on
 	help_label.visible = on
+	_refresh_layout()
 
 
 func set_resources(res: Dictionary) -> void:
 	var t := ""
 	for k in ["wood", "stone", "fiber", "ore", "food"]:
 		t += "%s  %d\n" % [RES_NAME[k], int(res.get(k, 0))]
+	t = t.trim_suffix("\n")
+	if res_label.text == t:
+		return
 	res_label.text = t
+	_refresh_layout()
 
 
 func set_clock(day: int, clock: String, speed: float) -> void:
-	clock_label.text = "第 %d 天   %s%s" % [day, clock, "   >>" if speed > 1.0 else ""]
+	var text := "第 %d 天   %s%s" % [day, clock, "   >>" if speed > 1.0 else ""]
+	if clock_label.text == text:
+		return
+	clock_label.text = text
+	_refresh_layout()
 
 
 func set_season(text: String) -> void:
-	if season_label != null:
+	if season_label != null and season_label.text != text:
 		season_label.text = text
+		_refresh_layout()
 
 
 func set_weapon(text: String) -> void:
-	if weapon_label != null:
+	if weapon_label != null and weapon_label.text != text:
 		weapon_label.text = text
+		_refresh_layout()
 
 
 func set_prompt(text: String) -> void:
+	if prompt_label.text == text:
+		return
 	prompt_label.text = text
 	# 空文本不该占地方：留着一个透明矩形会挡住下面的触控按钮（有布局自检兜底）
 	prompt_label.visible = (text != "")
+	_refresh_layout()
 
 
 func set_build(text: String) -> void:
+	if build_label.text == text:
+		return
 	build_label.text = text
 	build_label.visible = (text != "")
+	_refresh_layout()
 
 
 func toast(text: String) -> void:
 	toast_label.text = text
 	toast_t = 1.8
+	_refresh_layout()
 
 
 func _process(dt: float) -> void:

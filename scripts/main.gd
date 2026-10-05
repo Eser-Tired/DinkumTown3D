@@ -153,6 +153,10 @@ func _ready() -> void:
 	hud = HUDS.new()
 	hud.name = "HUD"
 	add_child(hud)
+	hud.layout_changed.connect(func(bottom: float):
+		var controls := get_node_or_null("TouchControls")
+		if controls != null:
+			controls.set_hud_column_bottom(bottom))
 	hud.set_resources(inv)
 	GameBus.toast.connect(Callable(hud, "toast"))
 
@@ -308,8 +312,8 @@ func _on_touch_layout(w: float, h: float, k: float) -> void:
 	# 【为什么要单独算文字缩放】k = min(W/1440, H/810)，竖屏手机算出来只有 0.75，
 	# 再被触控层的 0.60 下限压住，HUD 文字就只剩 12px——分辨率完全够，字却看不清。
 	# 触控层的下限是为「按钮不能太小」设的，不该直接传导到字号上。
-	# 这里用短边独立判断"够不够读"，只在极端窄高比下生效，宽屏下就等于 k。
-	var k_text := maxf(k, clampf(minf(w, h) / 810.0, 0.0, 1.0))
+	# 字号按短边独立放大，高分辨率也不再被原来的 1.0 上限卡住。
+	var k_text: float = preload("res://scripts/ui_layout.gd").text_scale(Vector2(w, h))
 	# 【为什么要先算 HUD 再算按钮】右侧竖列多高取决于字号和实测文字宽度，
 	# 把它复制到触控层里重算一定会漂。改成 HUD 算完把真实底边报回来，
 	# 触控层从那条线下面开始排——单向数据流，以后改 HUD 不用记得改触控层。

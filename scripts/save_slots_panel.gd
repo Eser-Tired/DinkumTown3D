@@ -1,5 +1,6 @@
 extends Control
 class_name SaveSlotsPanel
+const U := preload("res://scripts/ui_layout.gd")
 ## 存档槽位列表 —— 主界面与游戏内暂停菜单共用
 ##
 ## 【为什么只发信号不自己读档】同一个面板在两个宿主里语义不同：
@@ -66,6 +67,11 @@ func _ready() -> void:
 	add_child(_center)
 	_build()
 	refresh()
+	U.bind(self, _resize)
+
+
+func _resize() -> void:
+	set_ui_scale(U.menu_scale(get_viewport().get_visible_rect().size))
 
 
 ## 宿主有就用宿主的，没有就自己造（只读展示类 API，不需要世界引用）
@@ -165,19 +171,19 @@ func set_ui_scale(k: float) -> void:
 		_box.add_theme_constant_override("separation", int(BASE_SEP * k))
 		_box.custom_minimum_size = Vector2(BASE_BOX_W * k, 0.0)
 	if _title != null:
-		_title.add_theme_font_size_override("font_size", maxi(18, int(BASE_TITLE_FONT * k)))
+		_title.add_theme_font_size_override("font_size", U.text_size(BASE_TITLE_FONT, k, 18))
 	if _tip != null:
-		_tip.add_theme_font_size_override("font_size", maxi(11, int(BASE_TIP_FONT * k)))
+		_tip.add_theme_font_size_override("font_size", U.text_size(BASE_TIP_FONT, k, 11))
 	if _back_btn != null:
 		_back_btn.custom_minimum_size = BASE_BACK * k
-		_back_btn.add_theme_font_size_override("font_size", maxi(13, int(BASE_BACK_FONT * k)))
+		_back_btn.add_theme_font_size_override("font_size", U.text_size(BASE_BACK_FONT, k, 13))
 	for i in _slot_btns.size():
 		var b: Button = _slot_btns[i]
 		b.custom_minimum_size = BASE_SLOT * k
-		b.add_theme_font_size_override("font_size", maxi(12, int(BASE_SLOT_FONT * k)))
+		b.add_theme_font_size_override("font_size", U.text_size(BASE_SLOT_FONT, k, 12))
 		var d: Button = _del_btns[i]
 		d.custom_minimum_size = BASE_DEL * k
-		d.add_theme_font_size_override("font_size", maxi(11, int(BASE_DEL_FONT * k)))
+		d.add_theme_font_size_override("font_size", U.text_size(BASE_DEL_FONT, k, 11))
 
 
 func _btn_style(c: Color) -> StyleBoxFlat:
