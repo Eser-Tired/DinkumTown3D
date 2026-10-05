@@ -78,13 +78,14 @@ func _check_registry() -> void:
 		var id := str(hs.get("id", ""))
 		var kind := str(hs.get("kind", ""))
 		var pos: Vector2 = hs.get("pos", Vector2.ZERO)
+		var entrance: Vector2 = hs.get("entrance_origin", pos)
 		var rot := float(hs.get("rot", 0.0))
 		var sp: Dictionary = InteriorS.spec_of(kind)
 		_check(not sp.is_empty(), "%s 有室内规格" % id)
 
-		# 门必须在屋子正面：门点到中心的距离就该是 door_z
-		var dp := InteriorS.door_point(pos, rot, kind)
-		_close("%s_door_dist" % id, dp.distance_to(pos), float(sp.get("door_z", 0.0)), 0.001)
+		# 原包的门可以偏在侧边；仍从登记的入口原点验证朝向与交互距离。
+		var dp := InteriorS.door_point(entrance, rot, kind)
+		_close("%s_door_dist" % id, dp.distance_to(entrance), float(sp.get("door_z", 0.0)), 0.001)
 
 		# 门不能泡在水里（地形基准高度改过之后，一切都得跟水位比）
 		_check(m.terrain.water_depth_at(dp.x, dp.y) <= 0.0, "%s 门不在水里" % id)
@@ -95,7 +96,7 @@ func _check_registry() -> void:
 			if Vector2(c.pos.x, c.pos.y).distance_to(pos) < 0.01:
 				r_col = float(c.r)
 				break
-		var ep := InteriorS.exit_point(pos, rot, kind)
+		var ep: Vector2 = hs.get("exit_point", InteriorS.exit_point(pos, rot, kind))
 		_check(ep.distance_to(pos) > r_col + 0.42, "%s 出门点不被避让圆顶开 (%.2f > %.2f)"
 			% [id, ep.distance_to(pos), r_col + 0.42])
 
@@ -108,7 +109,7 @@ func _check_door_reach(h: Dictionary) -> void:
 	var id := str(h.get("id", ""))
 
 	# 站在门外：应命中
-	var ep := InteriorS.exit_point(pos, rot, kind)
+	var ep: Vector2 = h.get("exit_point", InteriorS.exit_point(pos, rot, kind))
 	await _stand(Vector3(ep.x, 0.0, ep.y))
 	_eq("%s_门口命中" % id, str(m._door_target().get("id", "")), id)
 
@@ -128,7 +129,7 @@ func _check_enter_exit(h: Dictionary) -> void:
 	var pos: Vector2 = h.get("pos", Vector2.ZERO)
 	var rot := float(h.get("rot", 0.0))
 	var id := str(h.get("id", ""))
-	var ep := InteriorS.exit_point(pos, rot, kind)
+	var ep: Vector2 = h.get("exit_point", InteriorS.exit_point(pos, rot, kind))
 
 	await _stand(Vector3(ep.x, 0.0, ep.y))
 	m._interact()

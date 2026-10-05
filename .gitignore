@@ -22,6 +22,11 @@ build/
 /ui_shots*/
 /realism_shots/
 /realism_shots*/
+/asset_shots/
+/asset_shots*/
+
+# 商业授权美术只随本地游戏使用，不能作为独立素材在源码仓库再分发。
+/local_assets/
 /interior_shots/
 /interior_shots*/
 /jump_shots/

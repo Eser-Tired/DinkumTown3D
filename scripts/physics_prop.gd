@@ -2,13 +2,16 @@ extends RigidBody3D
 ## 少量可推动道具；浮力采样与玩家共用 terrain 的水域真值。
 
 const PropsS := preload("res://scripts/props.gd")
+const OptionalAssets := preload("res://scripts/optional_assets.gd")
 var kind := "crate"
+var visual := ""
 var terrain: Node3D
 var _pending_restore: Dictionary = {}
 
 
-func configure(p_kind: String, terr: Node3D) -> void:
+func configure(p_kind: String, terr: Node3D, p_visual := "") -> void:
 	kind = p_kind
+	visual = "emace_crate" if kind == "crate" and p_visual == "emace_crate" else ""
 	terrain = terr
 	collision_layer = 4
 	collision_mask = 7
@@ -44,9 +47,15 @@ func configure(p_kind: String, terr: Node3D) -> void:
 		shape.size = mesh.size
 		shape_node.shape = shape
 	mi.material_override = PropsS.surface("wood", PropsS.C_WOOD_LIGHT if kind == "crate" else PropsS.C_WOOD)
-	add_child(mi)
+	var replacement: Node3D = OptionalAssets.instantiate("crate") if visual == "emace_crate" else null
+	if replacement != null:
+		replacement.name = "AssetVisual"
+		add_child(replacement)
+		mi.free()
+	else:
+		add_child(mi)
 	add_child(shape_node)
-	if kind == "crate":
+	if kind == "crate" and replacement == null:
 		# 面板外侧的压条，让可推动木箱更容易辨认。
 		for z in [-0.48, 0.48]:
 			for y in [-0.33, 0.33]:
@@ -94,7 +103,7 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 
 
 func serialize() -> Dictionary:
-	return {"kind": kind, "pos": _vec(global_position), "rot": _vec(global_rotation),
+	return {"kind": kind, "visual": visual, "pos": _vec(global_position), "rot": _vec(global_rotation),
 		"linear": _vec(linear_velocity), "angular": _vec(angular_velocity), "sleeping": sleeping}
 
 

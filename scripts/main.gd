@@ -21,6 +21,7 @@ const InteriorS := preload("res://scripts/interior.gd")
 const SleepS := preload("res://scripts/sleep_panel.gd")
 const CollisionS := preload("res://scripts/world_collision.gd")
 const PhysicsPropS := preload("res://scripts/physics_prop.gd")
+const OptionalAssets := preload("res://scripts/optional_assets.gd")
 
 const TOWN := Vector2(-14.0, -10.0)
 const LAKE := Vector2(48.0, 22.0)
@@ -519,7 +520,7 @@ func _build_town() -> void:
 	_place(PropsS.make_shop(), shop_p.x, shop_p.y, shop_rot)
 	_register_house("shop", shop_p, shop_rot, 0)
 
-	# 三间铁皮顶小屋
+	# 第一栋试用本地安装的资源包，另外两栋仍用现有外观。
 	var huts := [
 		[Vector2(-12, -13), PropsS.C_IRON_RED],
 		[Vector2(-4, 11), PropsS.C_IRON_GREEN],
@@ -532,8 +533,22 @@ func _build_town() -> void:
 		# _face_to(p, c) 正好把 +Z 转向镇中心。原来小屋多转了 PI，三间屋子集体
 		# 背对广场，玩家从中心走过去只看到没门的后墙——能进屋之后这就很致命。
 		var rot := _face_to(p, c)
-		_place(PropsS.make_hut(it[1]), p.x, p.y, rot)
+		var hut: Node3D = OptionalAssets.instantiate("hut") if i == 0 else null
+		if hut == null:
+			hut = PropsS.make_hut(it[1])
+		if i == 0:
+			hut.name = "SampleHut"
+		_place(hut, p.x, p.y, rot)
 		_register_house("hut", p, rot, i)
+		if hut.has_meta("entrance_origin"):
+			# 原包门偏在侧边，旋转后仍不能把房屋中心作为交互中心。
+			var offset: Vector2 = hut.get_meta("entrance_origin")
+			var origin: Vector3 = hut.transform * Vector3(offset.x, 0, offset.y)
+			houses[-1]["entrance_origin"] = Vector2(origin.x, origin.z)
+			var exit_local := Vector3(float(hut.get_meta("stair_x", offset.x)), 0, float(hut.get_meta("exit_distance")))
+			var exit_world := hut.transform * exit_local
+			houses[-1]["exit_point"] = Vector2(exit_world.x, exit_world.z)
+			houses[-1]["title"] = "木顶小屋"
 
 	# 帐篷营地：三顶都能进
 	# 【为什么不再用随机朝向】帐篷的门帘做在模型局部 +Z 侧，随机转一圈意味着
@@ -554,7 +569,7 @@ func _build_town() -> void:
 
 	# 杂项
 	_place(PropsS.make_clothesline(), c.x - 8, c.y + 12, 0.4)
-	_spawn_prop("crate", Vector3(c.x + 9, terrain.height_at(c.x + 9, c.y + 3) + 0.5, c.y + 3))
+	_spawn_prop("crate", Vector3(c.x + 9, terrain.height_at(c.x + 9, c.y + 3) + 0.5, c.y + 3), "emace_crate")
 	_spawn_prop("crate", Vector3(c.x + 10.1, terrain.height_at(c.x + 10.1, c.y + 3.4) + 0.5, c.y + 3.4))
 	_spawn_prop("barrel", Vector3(c.x + 11.3, terrain.height_at(c.x + 11.3, c.y + 2.5) + 0.6, c.y + 2.5))
 	_place(PropsS.make_signpost(), c.x + 3, c.y + 13, _face_to(c + Vector2(3, 13), c))
@@ -642,7 +657,7 @@ func _door_target() -> Dictionary:
 		return {}
 	for h in houses:
 		var hd: Dictionary = h
-		if InteriorS.at_door(player.global_position, hd.get("pos", Vector2.ZERO),
+		if InteriorS.at_door(player.global_position, hd.get("entrance_origin", hd.get("pos", Vector2.ZERO)),
 				float(hd.get("rot", 0.0)), str(hd.get("kind", "hut"))):
 			return hd
 	return {}
@@ -686,10 +701,11 @@ func _enter_house(h: Dictionary) -> void:
 	var sp: Dictionary = interior.ensure(id, kind, map_seed)
 	if sp.is_empty():
 		return
+	sp["title"] = str(h.get("title", sp.get("title", "屋子")))
 
 	# 出门落点现在就定死：出门、存档都用它，避免"退出点"被玩家走动带偏
 	var pos2: Vector2 = h.get("pos", Vector2.ZERO)
-	var ex2 := InteriorS.exit_point(pos2, float(h.get("rot", 0.0)), kind)
+	var ex2: Vector2 = h.get("exit_point", InteriorS.exit_point(pos2, float(h.get("rot", 0.0)), kind))
 	outdoor_exit = Vector3(ex2.x, terrain.height_at(ex2.x, ex2.y) + 0.1, ex2.y)
 
 	# 建造模式的预览是跟着视线落在地面上的，屋里没有地；带着它进屋会留下一个
@@ -1550,7 +1566,7 @@ func _collect_resource(n: Node3D, silent := false) -> void:
 		_spawn_prop("log", p + Vector3(0.9, 1.1, 0.4))
 
 
-func _spawn_prop(kind: String, pos: Vector3) -> RigidBody3D:
+func _spawn_prop(kind: String, pos: Vector3, visual := "") -> RigidBody3D:
 	physics_props = physics_props.filter(func(p): return is_instance_valid(p) and not p.is_queued_for_deletion())
 	if physics_props.size() >= MAX_PHYSICS_PROPS:
 		# 只回收最早生成的木段，保留玩家已经推走的木箱。
@@ -1564,7 +1580,7 @@ func _spawn_prop(kind: String, pos: Vector3) -> RigidBody3D:
 		physics_props[oldest].queue_free()
 		physics_props.remove_at(oldest)
 	var body := PhysicsPropS.new()
-	body.configure(kind, terrain)
+	body.configure(kind, terrain, visual)
 	body.position = pos
 	add_child(body)
 	physics_props.append(body)
@@ -1590,13 +1606,18 @@ func _restore_props(data: Variant) -> void:
 			prop.collision_mask = 0
 			prop.queue_free()
 	physics_props.clear()
+	var first_crate := true
 	for entry in data:
 		if not entry is Dictionary or physics_props.size() >= MAX_PHYSICS_PROPS:
 			continue
 		var kind := str(entry.get("kind", "crate"))
 		if not kind in ["crate", "barrel", "log"]:
 			continue
-		var body := _spawn_prop(kind, PhysicsPropS._read_vec(entry.get("pos", [])))
+		# 老存档没有 visual 字段；只迁移第一只箱子的外观，不改变数量或物理状态。
+		var visual := str(entry.get("visual", "emace_crate" if kind == "crate" and first_crate else ""))
+		if kind == "crate":
+			first_crate = false
+		var body := _spawn_prop(kind, PhysicsPropS._read_vec(entry.get("pos", [])), visual)
 		if body != null:
 			body.restore(entry)
 
