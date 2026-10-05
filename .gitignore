@@ -2,6 +2,10 @@
 .godot/
 *.uid
 export_credentials.cfg
+*.keystore
+*.jks
+/signing.json
+/signing-config.json
 .import/
 .mono/
 data_*/

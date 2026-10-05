@@ -53,7 +53,8 @@ func setup(root: Node) -> void:
 	e.glow_enabled = true
 	e.glow_intensity = 0.35
 	e.glow_hdr_threshold = 0.95
-	e.ssao_enabled = true
+	# Android 使用 Mobile；它没有 SSAO，不能沿用桌面效果开关反复触发引擎警告。
+	e.ssao_enabled = RenderingServer.get_current_rendering_method() != "mobile"
 	e.ssao_radius = 1.2
 	e.ssao_intensity = 1.1
 

@@ -254,7 +254,8 @@ func _build_ui() -> void:
 
 	# 左下角版本号 / 右下角提示
 	_ver_label = Label.new()
-	_ver_label.text = "v0.3 · Godot 4.7"
+	# 发布版本只在项目设置维护，避免打包后菜单仍显示开发期的硬编码版本。
+	_ver_label.text = "v%s · Godot 4.7" % ProjectSettings.get_setting("application/config/version", "dev")
 	_ver_label.add_theme_font_size_override("font_size", 15)
 	_ver_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85, 0.75))
 	_ver_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)

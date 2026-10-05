@@ -6,6 +6,8 @@ config_version=5
 [application]
 
 config/name="Dinkum Town 3D"
+config/version="1.1.0"
+config/icon="res://assets/app_icon.svg"
 config/description="Low-poly Australian outback town sandbox (procedural, Godot 4.7)"
 run/main_scene="res://scenes/main_menu.tscn"
 config/features=PackedStringArray("4.7")
