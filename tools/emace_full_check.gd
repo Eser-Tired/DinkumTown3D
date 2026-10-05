@@ -26,7 +26,10 @@ func _ready() -> void:
 	if installed:
 		for kind in Assets.KINDS:
 			var model := Assets.instantiate(kind)
-			_ok(model != null and ResourceLoader.get_dependencies(Assets.DIRECTORY + kind + ".scn").is_empty(), kind + "本地自包含模型")
+			var delivered := true
+			for dependency in ResourceLoader.get_dependencies(Assets.DIRECTORY + kind + ".scn"):
+				delivered = delivered and str(dependency).contains("res://assets/")
+			_ok(model != null and delivered, kind + "仓库完整交付CC0模型和共享材质")
 			if model == null:
 				continue
 			triangles += int(model.get_meta("triangle_count"))

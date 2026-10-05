@@ -1,5 +1,5 @@
 extends Node
-## 固定种子验证外观试换不会破坏碰撞、入口与旧存档；--no-emace 验证缺包回退。
+## 保留历史测试入口，验证当前 CC0 外观不会破坏碰撞、入口与旧存档。
 
 const Assets := preload("res://scripts/optional_assets.gd")
 const InteriorS := preload("res://scripts/interior.gd")
@@ -53,14 +53,18 @@ func _run() -> void:
 	_ok(shape.size.is_equal_approx(Vector3.ONE * 0.95), "木箱保留0.95米碰撞盒")
 	if installed:
 		for kind in ["hut", "crate"]:
-			_ok(ResourceLoader.get_dependencies(Assets.DIRECTORY + kind + ".scn").is_empty(), "%s场景没有原包外部路径依赖" % kind)
+			var delivered := true
+			for dependency in ResourceLoader.get_dependencies(Assets.DIRECTORY + kind + ".scn"):
+				delivered = delivered and str(dependency).contains("res://assets/")
+			_ok(delivered, "%s场景依赖全部位于仓库assets" % kind)
 		var bounds: AABB = hut.get_meta("visual_bounds")
 		print("HUT size=%s entrance=%s exit=%s triangles=%d" % [bounds.size, h.entrance_origin, h.exit_point, hut.get_meta("triangle_count")])
 		_ok(bounds.size.y > 4.5 and bounds.size.y < 5.5, "压缩高屋顶后高度处于实测适配范围")
 		var box_bounds: AABB = crate.get_node("AssetVisual").get_meta("visual_bounds")
 		_ok(box_bounds.position.is_equal_approx(Vector3.ONE * -0.475) and box_bounds.size.is_equal_approx(Vector3.ONE * 0.95), "木箱外观与实体盒精确对齐")
 		var entrance_local: Vector3 = hut.to_local(Vector3(h.entrance_origin.x, hut.global_position.y, h.entrance_origin.y))
-		_ok(absf(entrance_local.x + 1.63692) < 0.002 and absf(entrance_local.z - 0.39304) < 0.002, "入口采用网格实测的门偏移")
+		var actual_door := entrance_local + Vector3(0, 0, 2.9)
+		_ok(absf(actual_door.x) < 0.002 and absf(actual_door.z - 2.1) < 0.002, "交互点落在CC0房屋前门中轴")
 	var center: Vector2 = h.get("entrance_origin", h.pos)
 	var dp := InteriorS.door_point(center, h.rot, "hut")
 	var ep: Vector2 = h.get("exit_point", InteriorS.exit_point(h.pos, h.rot, "hut"))
@@ -86,22 +90,14 @@ func _run() -> void:
 	for i in 60:
 		await _wait(0.05)
 		var local: Vector3 = hut.to_local(m.player.global_position)
-		if local.z < (3.8 if installed else 3.1):
+		if local.z < 2.7:
 			reachable = true
 			break
 	GameBus.touch_move = Vector2.ZERO
 	print("WALK start=%s end=%s local=%s" % [start, m.player.global_position, hut.to_local(m.player.global_position)])
 	_ok(reachable and m.player.global_position.distance_to(start) > 0.8, "玩家能从出口走到门廊前")
 	if installed:
-		# 沿台阶中轴上门廊，再横移到偏左的门，实际检验栏杆与门板碰撞。
-		var left := Vector3.LEFT.rotated(Vector3.UP, float(h.rot))
-		GameBus.touch_move = Vector2(left.x, left.z)
-		for i in 30:
-			await _wait(0.05)
-			if hut.to_local(m.player.global_position).x < -1.4:
-				break
-		GameBus.touch_move = Vector2.ZERO
-		_ok(hut.to_local(m.player.global_position).x < -1.4 and m.player.is_on_floor() and str(m._door_target().get("id", "")) == "hut_0", "玩家可上门廊并横移到真实门前")
+		_ok(absf(hut.to_local(m.player.global_position).x) < 0.15 and m.player.is_on_floor() and str(m._door_target().get("id", "")) == "hut_0", "玩家可实际走到前门中轴并触发交互")
 	var data: Array = m._serialize_props()
 	_ok(str(data[0].get("visual", "")) == "emace_crate", "存档保存木箱的外观身份")
 	m._restore_props(data)

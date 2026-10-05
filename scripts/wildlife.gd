@@ -10,8 +10,9 @@ func _build_model() -> Node3D:
 	var height := 0.82 if small else (2.0 if species == "Stag" else 1.65)
 	rig.attach(root, "res://assets/animals/" + species + ".scn", height)
 	set_meta("species_name", NAMES[species])
-	walk_speed = 3.4 if small else 2.3
-	flee_speed = 9.5 if small else 8.8
+	# 缩放后自然步速约0.84~0.97，普通走路只略快放；逃跑保持明确速度差。
+	walk_speed = 1.4 if small else 1.15
+	flee_speed = 5.4 if small else 6.6
 	flee_dist = 16.0 if small else 12.0
 	wander_r = 34.0 if small else 26.0
 	hop_height = 0.0
@@ -31,7 +32,10 @@ func _process(dt: float) -> void:
 		rig.play("Idle_HitReact1", 0.05)
 	else:
 		var speed := Vector2(global_position.x - before.x, global_position.z - before.z).length() / maxf(dt, 0.001)
-		rig.play("Gallop" if speed > walk_speed * 2.2 else ("Walk" if speed > 0.15 else "Idle"))
+		if speed > 0.15:
+			rig.locomote("Gallop" if speed > float(rig.gait_speeds["Walk"]) * 1.8 else "Walk", speed)
+		else:
+			rig.play("Idle")
 		# 四足动物已有完整步态，不叠加袋鼠式的整身起伏。
 		model.rotation.x = 0.0
 		model.position.y = 0.0

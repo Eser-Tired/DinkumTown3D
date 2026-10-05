@@ -11,8 +11,9 @@ var yaw := 0.0
 var pitch := -0.35
 var cam_dist := 9.0
 
-var walk_speed := 5.2
-var run_speed := 8.6
+# 模型实测自然步速 1.39 / 3.12 m/s；1.8 / 5.2 留适度加速，避免旧速度下四倍快放走路。
+var walk_speed := 1.8
+var run_speed := 5.2
 var jump_v := 0.0
 var jump_h := 0.0
 var on_ground := true
@@ -335,6 +336,7 @@ func _physics_process(dt: float) -> void:
 		if is_on_floor() and not _motion_restored and velocity.y <= 0.0 and dir.length() > 0.01:
 			_try_step(dir * speed * dt)
 	_push_props(dt)
+	var motion_origin := global_position
 	move_and_slide()
 	_motion_restored = false
 	if indoor:
@@ -418,7 +420,10 @@ func _physics_process(dt: float) -> void:
 
 	# —— 战斗冷却与挥砍动画 ——
 	_update_combat(dt)
-	rig.update_player(self, dt, dir.length() > 0.01, running)
+	# 按碰撞之后的真实位移驱动步态，顶着墙按 W 时必须待机，不能原地跑。
+	var movement := global_position - motion_origin
+	var actual_speed := Vector2(movement.x, movement.z).length() / maxf(dt, 0.0001)
+	rig.update_player(self, dt, actual_speed > 0.08, running, actual_speed)
 
 
 func _dry_support() -> bool:
@@ -463,7 +468,8 @@ func _push_props(dt: float) -> void:
 		var normal := -collision.get_normal()
 		normal.y = 0.0
 		if normal.length() > 0.01:
-			body.apply_central_impulse(normal.normalized() * minf(horizontal.length(), 6.0) * dt * 24.0)
+			# 9kg 木箱的静摩擦约53N；自然步速降低后仍需至少72N，不能让慢走失去推动能力。
+			body.apply_central_impulse(normal.normalized() * clampf(horizontal.length(), 3.0, 6.0) * dt * 24.0)
 
 
 func restore_motion(pos: Vector3, saved_velocity := Vector3.ZERO) -> void:

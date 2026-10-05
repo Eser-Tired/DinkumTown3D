@@ -1,7 +1,7 @@
 extends RefCounted
-## 授权美术只在本地安装；缺包的源码检出仍能使用程序化外观运行与验收。
+## 可公开交付的 CC0 外观随仓库安装；旧 emace_* 存档身份继续映射，避免破坏读档。
 
-const DIRECTORY := "res://local_assets/emace/"
+const DIRECTORY := "res://assets/town/"
 static var _scenes: Dictionary = {}
 static var _textures: Dictionary = {}
 const KINDS := ["hut", "shop", "crate", "barrel", "beam", "post", "fence", "tree", "tree_alt", "bush", "bush_alt", "rock", "rock_alt", "stump", "log", "grass", "bed", "table", "chair", "shelf", "stove", "bag", "cup", "bottle", "firewood"]

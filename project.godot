@@ -1,5 +1,5 @@
 ; Engine configuration file.
-; Procedural 3D town with CC0 nature, characters and animals; no addons.
+; Procedural 3D town with repository-bundled CC0 art; no addons or local asset install.
 
 config_version=5
 

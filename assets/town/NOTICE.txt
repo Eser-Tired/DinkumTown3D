@@ -1,0 +1,20 @@
+当前游戏外观为可公开交付的资产，不依赖 local_assets。
+
+房屋、木柱：Kenney Fantasy Town Kit
+https://kenney.nl/assets/fantasy-town-kit
+源模型 CC0；原始许可：../kenney/licenses/FantasyTown.txt
+
+家具：Kenney Furniture Kit
+https://kenney.nl/assets/furniture-kit
+源模型 CC0；原始许可：../kenney/licenses/Furniture.txt
+
+容器、圆木、围栏、床卷、瓶子：Kenney Survival Kit
+https://kenney.nl/assets/survival-kit
+源模型 CC0；原始许可：../kenney/licenses/Survival.txt
+
+自然物回退模型：Quaternius Stylized Nature MegaKit Standard
+https://quaternius.com/packs/stylizednaturemegakit.html
+源模型 CC0；原始许可：../quaternius/LICENSE.txt
+
+ground_*.res 由本项目 tools/town_assets_import.gd 生成，不含 EmacE 贴图。
+装配、归一化和导入逻辑见该脚本。emace_* 仅是兼容旧存档的标识，不代表当前资源来源。

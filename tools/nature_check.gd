@@ -77,13 +77,13 @@ func _ready() -> void:
 	main.player.rig.update_player(main.player, 0.2, true, false)
 	_ok(main.player.rig.current == "Walk", "行走用Walk骨骼动画")
 	main.player.rig.update_player(main.player, 0.2, true, true)
-	_ok(main.player.rig.current == "Run" and is_equal_approx(main.player.rig.animation.speed_scale, 1.0), "跑步和速度倍率正常")
+	_ok(main.player.rig.current == "Run" and is_equal_approx(main.player.rig.animation.speed_scale, main.player.run_speed / main.player.rig.gait_speeds["Run"]), "跑步步频匹配移动速度")
 	main.player.swing_t = 0.1
 	main.player.rig.update_player(main.player, 0.15, false, false)
 	_ok(main.player.rig.current == "Sword_Slash", "挥砍用Sword_Slash动画")
 	main.player.swing_t = -1
 	main.player.rig.update_player(main.player, 0.2, true, false)
-	_ok(main.player.rig.current == "Walk" and is_equal_approx(main.player.rig.animation.speed_scale, 1.0), "攻击后行走不会继承挥砍加速")
+	_ok(main.player.rig.current == "Walk" and is_equal_approx(main.player.rig.animation.speed_scale, main.player.walk_speed / main.player.rig.gait_speeds["Walk"]), "攻击后行走恢复实测步频")
 	main.player.swimming = true
 	main.player.model.get_node("ArmR").rotation.x = 1.3
 	main.player.rig.update_player(main.player, 0.2, false, false)

@@ -76,7 +76,8 @@ func _run() -> void:
 	_teleport(Vector3(-14, spawn.y + 0.04, 13.8))
 	await _wait(0.2)
 	GameBus.touch_move = Vector2(0, 1)
-	await _wait(0.5)
+	# 行走已改为自然步速，按测试路程决定预算；终点/碰撞断言不放宽。
+	await _wait(2.6 / p.walk_speed)
 	GameBus.touch_move = Vector2.ZERO
 	_ok(p.global_position.z > 15.0 and p.global_position.y > spawn.y + 0.15,
 		"步行跨上18厘米台阶，无需跳跃 pos=%s" % p.global_position)
@@ -90,7 +91,7 @@ func _run() -> void:
 	await _wait(0.2)
 	GameBus.touch_move = Vector2(0, -1)
 	var dry_crossing := true
-	for i in 90:
+	for i in int(ceil(22.0 / p.walk_speed / 0.05)):
 		await _wait(0.05)
 		dry_crossing = dry_crossing and not p.swimming
 		if p.global_position.z < dock.global_position.z - 12.0:
@@ -104,7 +105,7 @@ func _run() -> void:
 		"深水上方的码头可站立，不误判为游泳")
 	# 从码头横向走出，而不是直接传送到水里。
 	GameBus.touch_move = Vector2(1, 0)
-	await _wait(1.4)
+	await _wait(7.28 / p.walk_speed)
 	GameBus.touch_move = Vector2.ZERO
 	await _wait(1.2)
 	_ok(p.swimming and p.global_position.y < 0.0, "从码头边缘走入水，进入游泳")
@@ -124,7 +125,7 @@ func _run() -> void:
 	_teleport(initial + Vector3(-1.35, -0.46, 0))
 	await _wait(0.3)
 	GameBus.touch_move = Vector2(1, 0)
-	await _wait(1.2)
+	await _wait(6.24 / p.walk_speed)
 	GameBus.touch_move = Vector2.ZERO
 	_ok(crate.global_position.x > initial.x + 0.35,
 		"角色接触推动木箱产生真实位移 crate=%s player=%s" % [crate.global_position, p.global_position])

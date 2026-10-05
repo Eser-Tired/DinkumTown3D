@@ -4,11 +4,13 @@ var used := {}
 var failed := false
 
 func _initialize() -> void:
-	for folder in ["quaternius", "characters", "animals"]:
+	for folder in ["quaternius", "characters", "animals", "kenney", "town"]:
 		var directory: String = "res://assets/" + folder + "/"
 		for file in DirAccess.get_files_at(directory):
-			if file.ends_with(".scn"):
+			if file.ends_with(".scn") or file.ends_with(".res"):
 				_visit(directory + file)
+		if not DirAccess.dir_exists_absolute(directory + "materials"):
+			continue
 		for file in DirAccess.get_files_at(directory + "materials"):
 			var path := directory + "materials/" + file
 			if not used.has(path):

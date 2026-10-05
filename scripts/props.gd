@@ -164,7 +164,7 @@ static func make_shop() -> Node3D:
 		sign.text = "杂货铺"
 		sign.font_size = 64
 		sign.pixel_size = 0.016
-		sign.position = Vector3(0, 3.8, 3.5)
+		sign.position = Vector3(0, 3.4, 2.75)
 		model.add_child(sign)
 		return model
 	var root := Node3D.new()

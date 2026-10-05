@@ -25,7 +25,7 @@ build/
 /asset_shots/
 /asset_shots*/
 
-# 商业授权美术只随本地游戏使用，不能作为独立素材在源码仓库再分发。
+# 旧受限素材安装缓存；现版本全部运行美术在 assets/，不再读取 local_assets。
 /local_assets/
 /interior_shots/
 /interior_shots*/

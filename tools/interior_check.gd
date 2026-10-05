@@ -90,15 +90,13 @@ func _check_registry() -> void:
 		# 门不能泡在水里（地形基准高度改过之后，一切都得跟水位比）
 		_check(m.terrain.water_depth_at(dp.x, dp.y) <= 0.0, "%s 门不在水里" % id)
 
-		# 出门落点必须落在房屋避让圆之外，否则一出门就被顶开
-		var r_col: float = 0.0
-		for c in m.colliders:
-			if Vector2(c.pos.x, c.pos.y).distance_to(pos) < 0.01:
-				r_col = float(c.r)
-				break
+		# 玩家已使用实体碰撞；collide_radius 只管建造占地，不能再把占地圆当门口碰撞。
+		# 实际放到出口等待落地，再测位置与地板支撑，能覆盖新旧建筑外形。
 		var ep: Vector2 = hs.get("exit_point", InteriorS.exit_point(pos, rot, kind))
-		_check(ep.distance_to(pos) > r_col + 0.42, "%s 出门点不被避让圆顶开 (%.2f > %.2f)"
-			% [id, ep.distance_to(pos), r_col + 0.42])
+		m.player.restore_motion(Vector3(ep.x, m.terrain.height_at(ep.x, ep.y) + 0.1, ep.y))
+		await _frames(20)
+		var displacement := Vector2(m.player.position.x, m.player.position.z).distance_to(ep)
+		_check(m.player.is_on_floor() and displacement < 0.08, "%s 出门点实际站稳，水平偏移 %.4f" % [id, displacement])
 
 
 # ——————————————— 门口判定 ———————————————

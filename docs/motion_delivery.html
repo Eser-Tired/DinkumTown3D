@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>动作修复与完整素材交付</title>
+<style>
+:root,html[data-theme="dark"]{--bg:#111820;--card:#1b2530;--text:#e9eff5;--muted:#a4b5c6;--line:#344556;--accent:#8cdbba;--link:#9acbff;color-scheme:dark}html[data-theme="light"]{--bg:#f5f7fa;--card:#fff;--text:#172536;--muted:#536678;--line:#d4dee7;--accent:#176a4d;--link:#1767b3;color-scheme:light}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:17px/1.7 system-ui,"Microsoft YaHei",sans-serif}main{max-width:1100px;margin:60px auto;padding:0 24px}h1{font-size:clamp(28px,4vw,44px);line-height:1.3}h2{margin-top:45px;font-size:25px}p{max-width:900px}a{color:var(--link)}button{border:1px solid var(--line);border-radius:8px;padding:9px 16px;background:var(--card);color:var(--text);cursor:pointer;font:inherit}#theme{position:fixed;top:16px;right:18px;z-index:2}figure{margin:20px 0;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}img{width:100%;display:block}figcaption{padding:14px 18px;color:var(--muted);font-size:15px}.controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:16px}input[type=range]{flex:1;min-width:140px;accent-color:var(--accent)}table{border-collapse:collapse;width:100%;font-size:16px}td,th{padding:12px;border-bottom:1px solid var(--line);text-align:left}th{color:var(--accent)}.table{overflow-x:auto}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.grid figure{margin:0}.note{color:var(--muted)}.good{color:var(--accent)}code{font-size:.9em;background:var(--card);padding:2px 6px;border-radius:4px}@media(max-width:650px){.grid{grid-template-columns:1fr}main{padding:0 16px;margin-top:72px}td,th{padding:8px}body{font-size:16px}}
+</style><script>document.documentElement.dataset.theme=localStorage.getItem('dinkum-report-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');</script></head>
+<body><button id="theme" type="button">切换主题</button><main>
+<p class="good">2026-10-05 · Godot 4.7.2 · 固定地图种子 20260921</p>
+<h1>停步姿态恢复正常，步频与真实位移同步</h1>
+<p>之前从行走切回待机时，动画缺少恒定的脚部位移轨道，脚会停留在上一个迈步位置。现在每段动画补齐全部骨骼的局部位置、旋转和缩放，人物采用 <code>Idle_Neutral</code>，三种动物也能恢复完整待机。跑步首尾补成连续循环，避免每圈跳脚。</p>
+<div class="grid"><figure><img src="shots/motion_before_stop.png" alt="修复前停步后人物左腿仍保留迈步姿态"><figcaption>修复前：左列已停步两秒，人物仍抬着一条腿，鹿也保留迈步脚位。</figcaption></figure><figure><img src="shots/motion_after_00.png" alt="修复后人物与动物停步站稳"><figcaption>修复后：左列完整待机恢复；中列行走、右列奔跑。</figcaption></figure></div>
+<h2>完整周期逐帧查看</h2>
+<figure><div class="controls"><button id="play" type="button">播放周期</button><label for="frame">相位</label><input id="frame" type="range" min="0" max="11" value="0"><span id="phase">0 / 12</span></div><img id="cycle" src="shots/motion_after_00.png" alt="四种角色完整步态周期"><figcaption>12 帧覆盖完整周期，方便比较脚位。这里按归一化相位播放；游戏中的播放速度按实际位移计算。左列保持停步姿态。</figcaption></figure>
+<p>人物在实体碰撞之后量水平位移，顶墙时即使持续按方向键也会待机。动物转弯先改变朝向，并沿身体前方移动；不再沿新目标方向横向平移。走路与跑步切换保留周期相位，游泳、攻击结束后也不会遗留骨骼姿态。</p>
+<div class="table"><table><thead><tr><th>角色</th><th>模型自然步速</th><th>模型自然跑速</th><th>游戏走 / 跑速度</th></tr></thead><tbody>
+<tr><td>冒险者</td><td>1.390 m/s</td><td>3.124 m/s</td><td>1.8 / 5.2 m/s</td></tr><tr><td>鹿</td><td>0.970 m/s</td><td>4.816 m/s</td><td>1.15 / 6.6 m/s</td></tr><tr><td>雄鹿</td><td>0.934 m/s</td><td>4.639 m/s</td><td>1.15 / 6.6 m/s</td></tr><tr><td>狐狸</td><td>0.839 m/s</td><td>2.567 m/s</td><td>1.4 / 5.4 m/s</td></tr></tbody></table></div>
+<p class="note">自然速度来自完整周期 120 段采样，统计近地支撑脚向后移动的速度中位数；不是用摆腿跨度估算。播放倍率 = 实际速度 / 自然速度。人物旧走 / 跑速度为 5.2 / 8.6，本轮按自然动作优先调低；慢走推动木箱仍然有效。</p>
+<h2>素材随 Git 仓库完整交付</h2>
+<p>旧 EmacE 许可证允许随游戏发布，但禁止独立资产文件再分发，所以没有直接公开旧模型。现用 Kenney 的 <a href="https://kenney.nl/assets/fantasy-town-kit">Fantasy Town Kit</a>、<a href="https://kenney.nl/assets/furniture-kit">Furniture Kit</a>、<a href="https://kenney.nl/assets/survival-kit">Survival Kit</a> 替换房屋、家具和道具，作者页面与包内许可均标明 CC0。地表贴图由项目脚本生成。</p>
+<div class="grid"><figure><img src="shots/public_hut.png" alt="可公开交付的新房屋"><figcaption>CC0 房屋，门口与碰撞重新适配。</figcaption></figure><figure><img src="shots/public_interior_hut.png" alt="随仓库交付的室内家具"><figcaption>床、桌椅、木结构和道具均随仓库交付。</figcaption></figure></div>
+<p>当前 <code>assets/</code> 内有 119 个场景、67 个资源文件及原始许可/来源说明，总计约 30.8 MiB。依赖审计覆盖 187 个资源，均在 <code>assets/</code> 或 <code>shaders/</code>；119 个场景可加载，19 张独立纹理和 147 个贴图表面逐一检查。人物、动物与自然包沿用已提交的 Quaternius CC0 素材。</p>
+<p>游戏不再读取 <code>local_assets/</code>，克隆仓库后无需额外安装素材或 Git LFS。旧存档中的 <code>emace_*</code> 只是兼容标识，会映射到新资产。<code>.godot</code> 缓存、个人存档和截图临时输出可以自行生成；项目源码、运行素材、许可与验收归档均提交。</p>
+<h2>验收证据</h2>
+<div class="table"><table><thead><tr><th>检查</th><th>结果</th></tr></thead><tbody>
+<tr><td>动作专项</td><td>58 项，fails=0；行走/跑步/攻击/死亡后脚部残留位移均为 0</td></tr><tr><td>战斗 / 端到端 / 水域</td><td>102 项 / 全流程 / 38 项，全部 fails=0</td></tr><tr><td>实体物理 / 房屋 / 全部外观 / 室内</td><td>23 项 / 34 项 / 90 项 / 全流程，全部 fails=0</td></tr><tr><td>自然与旧采集点</td><td>181 项，fails=0；37,151 个新增实例逐点 bad=0；191 个采集点身份不变</td></tr><tr><td>触控布局</td><td>1440×810、1280×720、1920×1080、2560×1440、720×1280、810×1440、1080×1920、1440×2560，全部 bad=0</td></tr><tr><td>完整交付</td><td>从 Git 索引生成干净检出；不带 local_assets 或原机器导入缓存，重建并运行通过</td></tr></tbody></table></div>
+<p class="note">图像均为实际 Godot 窗口渲染。部分逻辑测试在退出时仍有 ObjectDB 未释放实例提示，验收断言通过；本轮没有宣称修复这一退出清理问题。逐帧图是姿态检查，未用它代替真实移动、顶墙和转弯行为测试。</p>
+<p><a href="../README.md">运行说明</a> · <a href="../assets/town/NOTICE.txt">当前房屋与道具来源</a> · <a href="nature_assets.md">自然、人物与动物来源</a></p>
+</main><script>
+document.getElementById('theme').onclick=()=>{const theme=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=theme;localStorage.setItem('dinkum-report-theme',theme)};
+const slider=document.getElementById('frame'),cycle=document.getElementById('cycle'),phase=document.getElementById('phase'),play=document.getElementById('play');let timer=null;
+function show(){cycle.src='shots/motion_after_'+String(slider.value).padStart(2,'0')+'.png';phase.textContent=slider.value+' / 12'}slider.oninput=show;
+play.onclick=()=>{if(timer){clearInterval(timer);timer=null;play.textContent='播放周期'}else{timer=setInterval(()=>{slider.value=(Number(slider.value)+1)%12;show()},140);play.textContent='暂停'}};
+</script></body></html>

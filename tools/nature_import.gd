@@ -18,14 +18,20 @@ func _run() -> void:
 	output = args[1].trim_suffix("/") + "/"
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(output + "textures"))
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(output + "materials"))
-	var files := DirAccess.get_files_at(args[0])
+	# 选取多包文件时保留原始目录，GLB 可能引用相邻的外部调色板，不能只复制 GLB。
+	var files := {}
+	if args[0].ends_with(".json"):
+		files = JSON.parse_string(FileAccess.get_file_as_string(args[0]))
+	else:
+		for file in DirAccess.get_files_at(args[0]):
+			files[file] = args[0].path_join(file)
 	var count := 0
 	for file in files:
 		if file.get_extension() not in ["gltf", "glb"]:
 			continue
 		var doc := GLTFDocument.new()
 		var state := GLTFState.new()
-		var error := doc.append_from_file(args[0].path_join(file), state)
+		var error := doc.append_from_file(files[file], state)
 		if error != OK:
 			failed = true
 			push_error("导入失败：" + file)
@@ -35,7 +41,7 @@ func _run() -> void:
 		var root := Node3D.new()
 		root.name = "AssetVisual"
 		root.set_meta("visual_only", true)
-		root.set_meta("art_source", "quaternius")
+		root.set_meta("art_source", "kenney" if output.begins_with("res://assets/kenney/") else "quaternius")
 		var bounds := AABB()
 		var first := true
 		for mi in source.find_children("*", "MeshInstance3D", true, false):

@@ -66,9 +66,17 @@ func _process(dt: float) -> void:
 			hop_t -= interval
 		# 四足模型靠骨骼步态行走；沿用袋鼠的冲刺脉冲会让脚步和实际速度不断错开。
 		var boost := 1.0 if continuous_gait else 1.0 + sin(hop_t / interval * PI) * 1.7
-		p.x += dir.x * sp * boost * dt
-		p.z += dir.y * sp * boost * dt
-		rotation.y = lerp_angle(rotation.y, atan2(dir.x, dir.y), 0.16)
+		if continuous_gait:
+			# 转弯时沿身体朝向走并减速；直接沿新目标平移会让四足动物侧着滑行。
+			rotation.y = lerp_angle(rotation.y, atan2(dir.x, dir.y), 1.0 - exp(-12.0 * dt))
+			var forward := Vector2(sin(rotation.y), cos(rotation.y))
+			var distance := minf(sp * maxf(0.0, forward.dot(dir)) * dt, d2.length())
+			p.x += forward.x * distance
+			p.z += forward.y * distance
+		else:
+			p.x += dir.x * sp * boost * dt
+			p.z += dir.y * sp * boost * dt
+			rotation.y = lerp_angle(rotation.y, atan2(dir.x, dir.y), 0.16)
 	else:
 		hop_t = -1.0
 
