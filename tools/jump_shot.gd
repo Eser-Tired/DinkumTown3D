@@ -39,9 +39,8 @@ func _ready() -> void:
 	await get_tree().create_timer(0.8).timeout
 	await _save("jump0_ground.png")
 
-	# 起跳：直接给竖直速度，让 player 自己的物理跑完整条抛物线
-	m.player.jump_v = 7.4
-	m.player.on_ground = false
+	# 使用真实跳跃输入；jump_v 现在只记录结果，直接赋值不会驱动角色移动。
+	GameBus.touch_jump_edge = true
 	# 等姿态权重到位（_air_pose 的时间常数约 0.08 秒）再拍，否则拍到过渡中间帧
 	await get_tree().create_timer(0.22).timeout
 	print("air pose: y=%.2f on_ground=%s jump_h=%.2f"

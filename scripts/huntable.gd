@@ -86,6 +86,8 @@ func _die() -> void:
 	dead = true
 	hp = 0
 	_dead_t = 0.0
+	if has_node("AnimalCollision"):
+		get_node("AnimalCollision").collision_layer = 0
 	# 倒地：侧翻 + 下沉一点
 	if model != null:
 		model.rotation.z = 1.35
@@ -116,6 +118,8 @@ func _process(dt: float) -> void:
 
 func _respawn() -> void:
 	dead = false
+	if has_node("AnimalCollision"):
+		get_node("AnimalCollision").collision_layer = 8
 	_dead_t = 0.0
 	hp = max_hp
 	stun = 0.0

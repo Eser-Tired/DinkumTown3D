@@ -179,6 +179,8 @@ func ensure(id: String, kind: String, seed_val: int) -> Dictionary:
 		# 相机在玩家身后（+Z 侧）约 2.8，hut d/2=3.3、shop d/2=4，spawn.z=-1.2 都够安全。
 		spawn = Vector3(0.0, 0.0, -1.2)
 
+	# 实体移动不会再按固定 floor_y 贴地，室内地板、墙面和家具也必须有碰撞。
+	preload("res://scripts/world_collision.gd").attach(root)
 	add_child(root)
 	# 家具避让圆在构建时就已换算成世界 xz（玩家只认世界坐标），
 	# 这里不再叠加飞地偏移——否则避让圆会整体飘到屋子外面去。

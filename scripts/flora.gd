@@ -19,7 +19,7 @@ static func _mi(mesh: Mesh, m: Material, pos := Vector3.ZERO, rot := Vector3.ZER
 static func make_eucalyptus(rng: RandomNumberGenerator, scale := 1.0) -> Node3D:
 	var root := Node3D.new()
 	var h := rng.randf_range(6.0, 10.0) * scale
-	var bark := M.mat(Color(0.62, 0.56, 0.46).lerp(Color(0.48, 0.40, 0.32), rng.randf()))
+	var bark := M.surface("bark", Color(0.62, 0.56, 0.46).lerp(Color(0.48, 0.40, 0.32), rng.randf()))
 
 	var trunk := CylinderMesh.new()
 	trunk.top_radius = 0.28 * scale
@@ -67,7 +67,7 @@ static func make_eucalyptus(rng: RandomNumberGenerator, scale := 1.0) -> Node3D:
 static func make_acacia(rng: RandomNumberGenerator, scale := 1.0) -> Node3D:
 	var root := Node3D.new()
 	var h := rng.randf_range(3.0, 4.6) * scale
-	var bark := M.mat(Color(0.45, 0.35, 0.26))
+	var bark := M.surface("bark", Color(0.45, 0.35, 0.26))
 
 	var trunk := CylinderMesh.new()
 	trunk.top_radius = 0.16 * scale
@@ -107,7 +107,7 @@ static func make_acacia(rng: RandomNumberGenerator, scale := 1.0) -> Node3D:
 static func make_palm(rng: RandomNumberGenerator, scale := 1.0) -> Node3D:
 	var root := Node3D.new()
 	var h := rng.randf_range(5.0, 7.5) * scale
-	var bark := M.mat(Color(0.56, 0.46, 0.34))
+	var bark := M.surface("bark", Color(0.56, 0.46, 0.34))
 
 	var trunk := CylinderMesh.new()
 	trunk.top_radius = 0.20 * scale
@@ -206,7 +206,7 @@ static func make_rock(rng: RandomNumberGenerator, scale := 1.0, ore := false) ->
 	s.height = s.radius * rng.randf_range(0.7, 1.1)
 	s.radial_segments = 7
 	s.rings = 3
-	root.add_child(_mi(s, M.mat(rock_col), Vector3(0, s.radius * 0.55, 0),
+	root.add_child(_mi(s, M.surface("stone", rock_col), Vector3(0, s.radius * 0.55, 0),
 		Vector3(rng.randf_range(-0.2, 0.2), rng.randf() * TAU, rng.randf_range(-0.2, 0.2))))
 
 	if rng.randf() < 0.6:
@@ -215,7 +215,7 @@ static func make_rock(rng: RandomNumberGenerator, scale := 1.0, ore := false) ->
 		s2.height = s2.radius
 		s2.radial_segments = 6
 		s2.rings = 3
-		root.add_child(_mi(s2, M.mat(rock_col.lightened(0.06)),
+		root.add_child(_mi(s2, M.surface("stone", rock_col.lightened(0.06)),
 			Vector3(rng.randf_range(-1.2, 1.2), s2.radius * 0.6, rng.randf_range(-1.2, 1.2))))
 
 	if ore:
@@ -250,6 +250,6 @@ static func make_stump() -> Node3D:
 	c.bottom_radius = 0.62
 	c.height = 0.55
 	c.radial_segments = 7
-	root.add_child(_mi(c, M.mat(Color(0.42, 0.32, 0.24)), Vector3(0, 0.27, 0)))
+	root.add_child(_mi(c, M.surface("wood", Color(0.42, 0.32, 0.24)), Vector3(0, 0.27, 0)))
 	root.set_meta("collide_radius", 0.0)
 	return root

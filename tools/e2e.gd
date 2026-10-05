@@ -47,6 +47,9 @@ func _ready() -> void:
 	for i in 6:
 		await get_tree().process_frame
 
+	# 角色现在通过真实重力落地；先让上面传送到田块上空的角色落稳，
+	# 再比较存读档状态，避免把不同时间点的自由落体高度当成存档误差。
+	await get_tree().create_timer(0.6).timeout
 	var A := _snap()
 	_check(m.save_sys.save(1), "save(1) 返回 true")
 

@@ -152,6 +152,28 @@ func _check_enter_exit(h: Dictionary) -> void:
 	# 屋里有灯，而且不能被昼夜系统当成夜灯收走（白天会被整体关掉）
 	var sp: Dictionary = m.interior.space_of(id)
 	var node: Node3D = sp.get("node", null)
+	# 合并实体物理后，不能只断言 y=40；必须实际落在地板上并能起跳再落地。
+	_check(m.player.is_on_floor(), "%s 室内实体地板支撑角色" % id)
+	GameBus.touch_jump_edge = true
+	await _frames(8)
+	_check(not m.player.is_on_floor() and m.player.global_position.y > InteriorS.FLOOR_Y + 0.2,
+		"%s 室内真实跳跃" % id)
+	var airborne_save: Dictionary = m.serialize()
+	_check(airborne_save.get("player_velocity", []) == [0.0, 0.0, 0.0],
+		"%s 室内存档不把跳跃速度带到门外" % id)
+	await _frames(60)
+	_check(m.player.is_on_floor(), "%s 室内跳跃后重新落地" % id)
+	if kind == "hut":
+		var bed: Vector3 = sp.get("bed", Vector3.ZERO)
+		m.player.restore_motion(bed + Vector3(1.6, 0.02, 0))
+		await _frames(15)
+		GameBus.touch_move = Vector2(-1, 0)
+		await _frames(40)
+		GameBus.touch_move = Vector2.ZERO
+		_check(m.player.get_slide_collision_count() > 0 and m.player.global_position.x > bed.x + 0.6,
+			"%s 持续走向床侧，被实体家具阻挡" % id)
+		m.player.restore_motion(sp.get("spawn", Vector3.ZERO))
+		await _frames(20)
 	var lights := 0
 	var night := 0
 	if node != null:

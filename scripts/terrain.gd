@@ -63,6 +63,9 @@ var water_mi: MeshInstance3D
 
 # —— 季节染色 ——
 var ground_mi: MeshInstance3D
+var ground_body: StaticBody3D
+var wetness := 0.0
+var target_wetness := 0.0
 var tintables: Array = []          # 会跟着季节变色的材质（干草地被等）
 var season_tint := Color(1.0, 1.0, 1.0)
 var season_amt := 0.0
@@ -72,6 +75,7 @@ func _ready() -> void:
 	_init_noise()
 	ground_mi = _build_ground()
 	add_child(ground_mi)
+	_rebuild_collision()
 	water_mi = _build_water()
 	add_child(water_mi)
 
@@ -106,6 +110,7 @@ func set_map_seed(s: int) -> void:
 	_init_noise()
 	if ground_mi != null:
 		ground_mi.mesh = _ground_mesh()
+		_rebuild_collision()
 	if water_mi != null:
 		water_mi.queue_free()
 		water_mi = null
@@ -348,14 +353,29 @@ func _build_ground() -> MeshInstance3D:
 	return mi
 
 
-func _ground_material() -> StandardMaterial3D:
-	var mat := StandardMaterial3D.new()
-	mat.vertex_color_use_as_albedo = true
-	mat.roughness = 0.97
-	mat.metallic = 0.0
-	mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
-	mat.uv1_scale = Vector3(1, 1, 1)
+func _ground_material() -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = preload("res://shaders/ground.gdshader")
+	mat.set_shader_parameter("water_level", WATER_Y)
 	return mat
+
+
+func _rebuild_collision() -> void:
+	# 使用渲染网格本身，保证三角形内的高度也与脚下地面一致。
+	if ground_body == null:
+		ground_body = StaticBody3D.new()
+		ground_body.name = "GroundCollision"
+		ground_body.collision_layer = 1
+		ground_body.collision_mask = 6
+		var cs := CollisionShape3D.new()
+		cs.name = "Shape"
+		ground_body.add_child(cs)
+		add_child(ground_body)
+	ground_body.get_node("Shape").shape = ground_mi.mesh.create_trimesh_shape()
+
+
+func set_weather(w: String) -> void:
+	target_wetness = 1.0 if w == "rain" or w == "storm" else 0.0
 
 
 func _ground_mesh() -> ArrayMesh:
@@ -492,17 +512,24 @@ void fragment() {
 	ALBEDO = col;
 	// 浅水透（看得见水底的泥沙），深水几乎不透
 	ALPHA = mix(0.40, 0.95, clamp(d * 1.8, 0.0, 1.0));
-	ROUGHNESS = mix(0.06, 0.20, d);
-	SPECULAR = 0.85;
+	ROUGHNESS = mix(0.20, 0.32, d);
+	SPECULAR = 0.5;
 	METALLIC = 0.0;
-	NORMAL = normalize(vec3(
+	vec3 wave_normal = normalize(vec3(
 		sin(v_world.x * 0.8 + u_time * 1.7) * 0.12, 1.0,
 		cos(v_world.z * 0.75 + u_time * 1.3) * 0.12));
+	NORMAL = normalize((VIEW_MATRIX * vec4(wave_normal, 0.0)).xyz);
+	float foam = (1.0 - smoothstep(0.015, 0.09, d)) * smoothstep(0.45, 0.75, ripple);
+	ALBEDO = mix(ALBEDO, vec3(0.80, 0.89, 0.82), foam * 0.5);
+	ALPHA = max(ALPHA, foam * 0.7);
 }
 """
 	return sh
 
 
 func _process(_dt: float) -> void:
+	wetness = move_toward(wetness, target_wetness, _dt * 0.18)
+	if ground_mi != null:
+		ground_mi.material_override.set_shader_parameter("wetness", wetness)
 	if water_mat:
 		water_mat.set_shader_parameter("u_time", Time.get_ticks_msec() * 0.001)

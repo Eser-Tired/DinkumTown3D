@@ -19,6 +19,8 @@ const InvUIS := preload("res://scripts/inventory_ui.gd")
 const PauseS := preload("res://scripts/pause_menu.gd")
 const InteriorS := preload("res://scripts/interior.gd")
 const SleepS := preload("res://scripts/sleep_panel.gd")
+const CollisionS := preload("res://scripts/world_collision.gd")
+const PhysicsPropS := preload("res://scripts/physics_prop.gd")
 
 const TOWN := Vector2(-14.0, -10.0)
 const LAKE := Vector2(48.0, 22.0)
@@ -118,6 +120,8 @@ var rain_particles: GPUParticles3D = null
 
 ## 可狩猎动物列表（重新生成时会整体清空重填）
 var critters: Array = []
+var physics_props: Array = []
+const MAX_PHYSICS_PROPS := 24
 
 
 func _ready() -> void:
@@ -444,6 +448,8 @@ func _setup_rain() -> void:
 
 
 func _on_weather(w: String) -> void:
+	if terrain != null:
+		terrain.set_weather(w)
 	if rain_particles != null:
 		# 屋里不下雨：雨幕是挂在玩家身上的粒子柱，跟着人一起进屋就成了室内暴雨
 		rain_particles.emitting = (w == "rain" or w == "storm") and house_id == ""
@@ -454,6 +460,7 @@ func _place(node: Node3D, x: float, z: float, rot_y := 0.0, scl := 1.0) -> void:
 	node.position = Vector3(x, terrain.height_at(x, z), z)
 	node.rotation.y = rot_y
 	node.scale = Vector3(scl, scl, scl)
+	CollisionS.attach(node)
 	add_child(node)
 	var r: float = node.get_meta("collide_radius", 0.0)
 	if r > 0.0:
@@ -466,6 +473,8 @@ func _place_flora(node: Node3D, x: float, z: float, rot := 0.0, scl := 1.0) -> v
 	node.position = Vector3(x, terrain.height_at(x, z), z)
 	node.rotation.y = rot
 	node.scale = Vector3(scl, scl, scl)
+	if float(node.get_meta("collide_radius", 0.0)) > 0.0:
+		CollisionS.attach(node, true)
 	add_child(node)
 	var r: float = node.get_meta("collide_radius", 0.0)
 	if r > 0.0:
@@ -541,7 +550,9 @@ func _build_town() -> void:
 
 	# 杂项
 	_place(PropsS.make_clothesline(), c.x - 8, c.y + 12, 0.4)
-	_place(PropsS.make_crates(), c.x + 9, c.y + 3)
+	_spawn_prop("crate", Vector3(c.x + 9, terrain.height_at(c.x + 9, c.y + 3) + 0.5, c.y + 3))
+	_spawn_prop("crate", Vector3(c.x + 10.1, terrain.height_at(c.x + 10.1, c.y + 3.4) + 0.5, c.y + 3.4))
+	_spawn_prop("barrel", Vector3(c.x + 11.3, terrain.height_at(c.x + 11.3, c.y + 2.5) + 0.6, c.y + 2.5))
 	_place(PropsS.make_signpost(), c.x + 3, c.y + 13, _face_to(c + Vector2(3, 13), c))
 
 	for off in [Vector2(7, -2), Vector2(-9, 5), Vector2(1, 11), Vector2(-17, -6), Vector2(15, 13)]:
@@ -552,15 +563,29 @@ func _build_town() -> void:
 	# 【为什么用 water_depth_at 而不是 height_at】地形整体抬升过（见 terrain.BASE_LIFT），
 	# 拿绝对高度跟 0.9 比已经不是在判断"有没有水"了。所有"是不是水"的判断
 	# 都必须走 water_depth_at，否则地形一变就集体失效。
-	var dock_z := 60.0
-	for d in range(30, 62):
+	var dock_z := LAKE.y + 44.0
+	for d in range(28, 62):
 		var cand := LAKE + Vector2(0.0, float(d))
 		if terrain.water_depth_at(cand.x, cand.y) <= 0.0:
 			dock_z = LAKE.y + float(d)
 			break
-	if dock_z > 59.0:
-		dock_z = LAKE.y + 46.0
-	_place(PropsS.make_dock(10), LAKE.x, dock_z, 0.0)
+	var dock := PropsS.make_dock(10)
+	dock.name = "Dock"
+	dock.position = Vector3(LAKE.x, terrain.water_level(), dock_z)
+	# 坡道在干岸与码头甲板之间衔接，不让第一块板悬在玩家腰间。
+	var shore_z := dock_z + 4.0
+	var shore_y: float = terrain.height_at(LAKE.x, shore_z) + 0.04
+	var start := Vector3(0, 0.94, 0.45)
+	var end := Vector3(0, shore_y - terrain.water_level(), 4.0)
+	var span := end - start
+	dock.add_child(PropsS._box(Vector3(4.2, 0.14, span.length()),
+		PropsS.surface("wood", PropsS.C_WOOD), (start + end) * 0.5,
+		Vector3(-atan2(span.y, span.z), 0, 0)))
+	CollisionS.attach(dock)
+	add_child(dock)
+	_collect_anims(dock)
+	_spawn_prop("log", Vector3(LAKE.x - 6.0, terrain.water_level() + 0.6, LAKE.y + 8.0))
+	_spawn_prop("log", Vector3(LAKE.x + 5.0, terrain.water_level() + 0.8, LAKE.y + 4.0))
 
 	# 矿洞入口
 	var mine_p := Vector2(-58.0, -46.0)
@@ -876,7 +901,20 @@ func _register_critter(c: Node3D) -> void:
 	critters.append(c)
 	var h := c as Huntable
 	h.died.connect(_on_critter_died)
-	# 动物也参与玩家的圆形避让，否则会直接穿过袋鼠
+	var body := AnimatableBody3D.new()
+	body.name = "AnimalCollision"
+	body.sync_to_physics = false
+	body.collision_layer = 8
+	body.collision_mask = 2
+	var shape := CollisionShape3D.new()
+	var capsule := CapsuleShape3D.new()
+	capsule.radius = h.hit_radius * 0.45
+	capsule.height = maxf(1.35, capsule.radius * 2.0)
+	shape.shape = capsule
+	shape.position.y = capsule.height * 0.5
+	body.add_child(shape)
+	c.add_child(body)
+	# 保留占地记录，供建筑放置检查使用。
 	colliders.append({
 		"node": c,
 		"pos": Vector2(c.global_position.x, c.global_position.z),
@@ -1504,6 +1542,59 @@ func _collect_resource(n: Node3D, silent := false) -> void:
 		var stump := FloraS.make_stump()
 		stump.position = Vector3(p.x, terrain.height_at(p.x, p.z), p.z)
 		add_child(stump)
+		# 采集收益仍立即入包；木段是可推动的环境反馈，不重复发资源。
+		_spawn_prop("log", p + Vector3(0.9, 1.1, 0.4))
+
+
+func _spawn_prop(kind: String, pos: Vector3) -> RigidBody3D:
+	physics_props = physics_props.filter(func(p): return is_instance_valid(p) and not p.is_queued_for_deletion())
+	if physics_props.size() >= MAX_PHYSICS_PROPS:
+		# 只回收最早生成的木段，保留玩家已经推走的木箱。
+		var oldest := -1
+		for i in physics_props.size():
+			if physics_props[i].kind == "log":
+				oldest = i
+				break
+		if oldest < 0:
+			return null
+		physics_props[oldest].queue_free()
+		physics_props.remove_at(oldest)
+	var body := PhysicsPropS.new()
+	body.configure(kind, terrain)
+	body.position = pos
+	add_child(body)
+	physics_props.append(body)
+	return body
+
+
+func _serialize_props() -> Array:
+	var out: Array = []
+	for prop in physics_props:
+		if is_instance_valid(prop) and not prop.is_queued_for_deletion():
+			out.append(prop.serialize())
+	return out
+
+
+func _restore_props(data: Variant) -> void:
+	# 没有这个字段的旧存档继续使用开局的木箱与漂木。
+	if not data is Array:
+		return
+	for prop in physics_props:
+		if is_instance_valid(prop):
+			prop.freeze = true
+			prop.collision_layer = 0
+			prop.collision_mask = 0
+			prop.queue_free()
+	physics_props.clear()
+	for entry in data:
+		if not entry is Dictionary or physics_props.size() >= MAX_PHYSICS_PROPS:
+			continue
+		var kind := str(entry.get("kind", "crate"))
+		if not kind in ["crate", "barrel", "log"]:
+			continue
+		var body := _spawn_prop(kind, PhysicsPropS._read_vec(entry.get("pos", [])))
+		if body != null:
+			body.restore(entry)
 
 
 # ——————————————— 建造 ———————————————
@@ -1698,7 +1789,8 @@ func _process(dt: float) -> void:
 		step_dist += moved
 		if step_dist >= 1.9:
 			step_dist = 0.0
-			GameBus.player_step.emit(moved / maxf(dt, 0.0001), ppos)
+			# 角色按固定物理帧移动，渲染帧的 moved/dt 会随刷新率抖动；用真实速度驱动音高。
+			GameBus.player_step.emit(Vector2(player.velocity.x, player.velocity.z).length(), ppos)
 
 	_update_water_hud()
 
@@ -1793,6 +1885,8 @@ func serialize() -> Dictionary:
 		"time": dn.time,
 		"day": dn.day_count,
 		"pos": [pp.x, pp.y, pp.z],
+		# 室内存的是门外落点，不能把室内跳跃速度带到户外读档位置。
+		"player_velocity": PhysicsPropS._vec(Vector3.ZERO if house_id != "" else player.velocity),
 		"yaw": player.yaw,
 		"pitch": player.pitch,
 		"harvested": harvested_ids.duplicate(),
@@ -1801,6 +1895,7 @@ func serialize() -> Dictionary:
 		# 动物状态：只存"血量 + 是否已死"，位置不存——动物一直在动，存了也没意义，
 		# 读档后从 home 重新游走即可。索引与 _spawn_critters 的生成顺序一一对应。
 		"critters": _serialize_critters(),
+		"physics_props": _serialize_props(),
 	}
 
 
@@ -1840,6 +1935,8 @@ func _deserialize_critters(arr: Variant) -> void:
 		else:
 			h.dead = false
 			h.hp = clampi(int(pa[0]), 1, h.max_hp)
+		if h.has_node("AnimalCollision"):
+			h.get_node("AnimalCollision").collision_layer = 0 if h.dead else 8
 
 
 func deserialize(d: Dictionary) -> void:
@@ -1860,10 +1957,12 @@ func deserialize(d: Dictionary) -> void:
 	var p: Variant = d.get("pos", [0.0, 0.0, 0.0])
 	if p is Array and (p as Array).size() >= 3:
 		var pa: Array = p
-		player.global_position = Vector3(float(pa[0]), float(pa[1]), float(pa[2]))
+		player.restore_motion(Vector3(float(pa[0]), float(pa[1]), float(pa[2])),
+			PhysicsPropS._read_vec(d.get("player_velocity", [])))
 		last_pos = player.global_position
 	player.yaw = float(d.get("yaw", 0.0))
 	player.pitch = float(d.get("pitch", -0.35))
+	_restore_props(d.get("physics_props", null))
 
 	# 回放已采集：世界是按固定随机种子重建的，按稳定 id 移除即可
 	var hv: Variant = d.get("harvested", [])

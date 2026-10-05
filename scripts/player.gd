@@ -1,11 +1,11 @@
 extends CharacterBody3D
 ## 第三人称角色：WASD 移动 / 右键拖拽转视角 / 滚轮缩放 / 空格跳跃
-## 贴地用地形高度函数，与建筑用圆形避让
+## 胶囊碰撞 + 固定步长移动；水深只负责游泳状态，不覆盖地面碰撞。
 
 const M := preload("res://scripts/props.gd")
 
 var terrain: Node3D
-var obstacles: Array = []          # [{pos:Vector2, r:float}]
+var obstacles: Array = []          # 保留 setup 契约；实体碰撞由引擎处理。
 
 var yaw := 0.0
 var pitch := -0.35
@@ -19,6 +19,10 @@ var on_ground := true
 var walk_phase := 0.0
 ## 空中姿态权重 0..1：起跳/落地各留约 0.1 秒过渡，避免四肢瞬变
 var _air_pose := 0.0
+var _last_physics_pos := Vector3.ZERO
+var _jump_was_pressed := false
+var _motion_restored := false
+const STEP_HEIGHT := 0.28
 
 # —— 水域 ——
 ## 水深超过 SWIM_MIN 就进入游泳：玩家身高约 1.8，水过腰再走就不合理了
@@ -66,6 +70,17 @@ var swing_dur := 0.30
 
 
 func _ready() -> void:
+	collision_layer = 2
+	collision_mask = 13
+	floor_snap_length = 0.32
+	floor_max_angle = deg_to_rad(48.0)
+	var capsule := CapsuleShape3D.new()
+	capsule.radius = 0.36
+	capsule.height = 1.8
+	var shape := CollisionShape3D.new()
+	shape.shape = capsule
+	shape.position.y = 0.9
+	add_child(shape)
 	model = Node3D.new()
 	model.name = "Model"
 	add_child(model)
@@ -88,6 +103,7 @@ func setup(terr: Node3D, obs: Array, spawn2: Vector2) -> void:
 	terrain = terr
 	obstacles = obs
 	global_position = Vector3(spawn2.x, terr.height_at(spawn2.x, spawn2.y) + 0.1, spawn2.y)
+	_last_physics_pos = global_position
 	if terr != null and terr.has_method("water_level"):
 		_water_level = float(terr.water_level())
 	# 开局让身体朝向与相机一致。否则 model.rotation.y 停在 0，
@@ -96,8 +112,8 @@ func setup(terr: Node3D, obs: Array, spawn2: Vector2) -> void:
 	model.rotation.y = yaw + PI
 
 
-## 传送进室内：切换地面数据源、可行走矩形与家具避让圆，并拉近镜头。
-## cols 由 interior.gd 给出（世界 xz + 半径）。
+## 传送进室内：切换地面参考、可行走矩形，并拉近镜头。
+## cols 保留原接口；家具避让已由室内实体碰撞负责。
 func enter_indoor(fy: float, center: Vector2, half: Vector2, cols: Array) -> void:
 	indoor = true
 	floor_y = fy
@@ -113,6 +129,7 @@ func enter_indoor(fy: float, center: Vector2, half: Vector2, cols: Array) -> voi
 	jump_h = 0.0
 	jump_v = 0.0
 	on_ground = true
+	restore_motion(global_position)
 
 
 ## 回到户外：还原地形贴地、世界边界与镜头距离
@@ -126,6 +143,7 @@ func exit_indoor(cols: Array) -> void:
 	jump_h = 0.0
 	jump_v = 0.0
 	on_ground = true
+	restore_motion(global_position)
 
 
 func _mi(mesh: Mesh, m: Material, pos := Vector3.ZERO, rot := Vector3.ZERO, scl := Vector3.ONE) -> MeshInstance3D:
@@ -218,7 +236,9 @@ func _input(event: InputEvent) -> void:
 				cam_dist = minf(cam_dist, INDOOR_CAM_MAX)
 
 
-func _process(dt: float) -> void:
+func _physics_process(dt: float) -> void:
+	if terrain == null:
+		return
 	# —— 触控：视角拖拽 / 双指缩放（读后清零，桌面恒为零值，无副作用）——
 	if GameBus.touch_look != Vector2.ZERO:
 		yaw -= GameBus.touch_look.x * 0.0055
@@ -250,14 +270,6 @@ func _process(dt: float) -> void:
 	if dir.length() > 0.01:
 		dir = dir.normalized().rotated(Vector3.UP, yaw)
 
-	# 速度按水域打折。用本帧起点的位置判定即可——位移一帧只有几十厘米，
-	# 不值得为此先把位移算出来再回填速度。
-	var speed := run_speed if running else walk_speed
-	if swimming:
-		speed *= SWIM_SPEED_MUL
-	elif swim_depth > 0.06:
-		speed *= WADE_SPEED_MUL     # 趟浅水也慢一点
-
 	# —— 下潜与憋气 ——
 	# 松手 / 气用完 / 上岸，三种情况都要退出下潜，所以直接算成一行。
 	var want_dive := Input.is_key_pressed(KEY_CTRL) or Input.is_key_pressed(KEY_C) \
@@ -271,74 +283,59 @@ func _process(dt: float) -> void:
 		# 出水回气更快，不至于让玩家在岸边干等
 		breath = minf(1.0, breath + dt / (BREATH_MAX * 0.32))
 
-	# —— 跳跃（水里不适用：垂直方向交给漂浮/下潜接管）——
-	var want_jump := Input.is_key_pressed(KEY_SPACE) or GameBus.touch_jump_edge
-	GameBus.touch_jump_edge = false
-	if not swimming:
-		if want_jump and on_ground:
-			jump_v = 7.4
-			on_ground = false
-		if not on_ground:
-			jump_v -= 21.0 * dt
-			jump_h += jump_v * dt
-			if jump_h <= 0.0:
-				jump_h = 0.0
-				jump_v = 0.0
-				on_ground = true
+	# 外部读档/测试传送后清掉旧速度，防止把传送前的落体速度带到新位置。
+	if global_position.distance_to(_last_physics_pos) > 2.0:
+		velocity = Vector3.ZERO
+		_motion_restored = true
+	# 室内位于地图之外，地面参考和边界仍用室内规格，移动统一走实体碰撞。
+	var gy: float = floor_y if indoor else terrain.height_at(global_position.x, global_position.z)
+	swim_depth = 0.0 if indoor else _water_depth(global_position.x, global_position.z)
+	swimming = swim_depth > SWIM_MIN and not _dry_support()
+	diving = swimming and want_dive and breath > 0.0
+	# 老存档可能在地形以下；只修正陆地上的非法位置。
+	if not swimming and global_position.y < gy - 0.35:
+		global_position.y = gy + 0.04
+		velocity.y = 0.0
 
-	# —— 位移 ——
-	var p := global_position
-	p.x += dir.x * speed * dt
-	p.z += dir.z * speed * dt
-
-	# 建筑圆形避让
-	for o in obstacles:
-		var d2 := Vector2(p.x - o.pos.x, p.z - o.pos.y)
-		var min_d: float = o.r + 0.42
-		if d2.length() < min_d and d2.length() > 0.001:
-			d2 = d2.normalized() * min_d
-			p.x = o.pos.x + d2.x
-			p.z = o.pos.y + d2.y
-
-	# 世界边界
-	if indoor:
-		p.x = clampf(p.x, bounds_center.x - bounds_half.x, bounds_center.x + bounds_half.x)
-		p.z = clampf(p.z, bounds_center.y - bounds_half.y, bounds_center.y + bounds_half.y)
-	else:
-		var lim := 112.0
-		p.x = clampf(p.x, -lim, lim)
-		p.z = clampf(p.z, -lim, lim)
-
-	# —— 垂直：陆地贴地、水中漂浮 ——
-	# 用位移【之后】的位置重新判定一次：这一步决定玩家是被地面托着还是被水托着，
-	# 用水域起点位置判定会在跨过岸线的那一帧做错决定。
-	var gy: float
-	if indoor:
-		gy = floor_y
-		swim_depth = 0.0        # 屋里没有水，别让 HUD 冒出憋气条
-	else:
-		gy = terrain.height_at(p.x, p.z)
-		swim_depth = _water_depth(p.x, p.z)
-	swimming = swim_depth > SWIM_MIN
+	var speed := run_speed if running else walk_speed
 	if swimming:
-		on_ground = false
-		jump_h = 0.0
-		jump_v = 0.0
-		# 漂浮基准：身体没入水面 FLOAT_SUBMERGE，头露出呼吸
+		speed *= SWIM_SPEED_MUL
+	elif swim_depth > 0.06 and global_position.y < _water_level + 0.2:
+		speed *= WADE_SPEED_MUL
+	velocity.x = dir.x * speed
+	velocity.z = dir.z * speed
+
+	var jump_pressed := Input.is_key_pressed(KEY_SPACE)
+	var want_jump := (jump_pressed and not _jump_was_pressed) or GameBus.touch_jump_edge
+	_jump_was_pressed = jump_pressed
+	GameBus.touch_jump_edge = false
+	if swimming:
+		motion_mode = CharacterBody3D.MOTION_MODE_FLOATING
 		var target := _water_level - FLOAT_SUBMERGE
 		if diving:
 			target = maxf(_water_level - DIVE_MAX, gy + 0.55)
-		# 水里上下都"黏"：下潜比上浮略快（蹬水容易，浮起来慢），
-		# 直接设位置会像电梯，用插值才有浮力感。
-		# 但也不能太黏：2.4 的时间常数约 0.42 秒，从水面跳进湖要 2 秒才稳下来，
-		# 手感是"陷在水里"。3.0/4.6 大约 1 秒到位，既有浮力感又不拖。
-		var rate := (4.6 if diving else 3.0) * dt
-		p.y = lerpf(p.y, target, clampf(rate, 0.0, 1.0))
-		p.y = maxf(p.y, gy + 0.45)
+		velocity.y = clampf((target - global_position.y) * (4.6 if diving else 3.0), -6.0, 6.0)
 	else:
-		p.y = gy + jump_h
-	global_position = p
-
+		motion_mode = CharacterBody3D.MOTION_MODE_GROUNDED
+		if is_on_floor() and not _motion_restored:
+			velocity.y = 7.4 if want_jump else 0.0
+		else:
+			velocity.y -= 21.0 * dt
+		if is_on_floor() and not _motion_restored and velocity.y <= 0.0 and dir.length() > 0.01:
+			_try_step(dir * speed * dt)
+	_push_props(dt)
+	move_and_slide()
+	_motion_restored = false
+	if indoor:
+		global_position.x = clampf(global_position.x, bounds_center.x - bounds_half.x, bounds_center.x + bounds_half.x)
+		global_position.z = clampf(global_position.z, bounds_center.y - bounds_half.y, bounds_center.y + bounds_half.y)
+	else:
+		global_position.x = clampf(global_position.x, -112.0, 112.0)
+		global_position.z = clampf(global_position.z, -112.0, 112.0)
+	on_ground = is_on_floor() and not swimming
+	jump_v = velocity.y
+	jump_h = maxf(0.0, global_position.y - gy) if not swimming else 0.0
+	_last_physics_pos = global_position
 	# —— 朝向与程序化动画 ——
 	if dir.length() > 0.01:
 		var target_yaw := atan2(dir.x, dir.z)
@@ -409,6 +406,61 @@ func _process(dt: float) -> void:
 
 	# —— 战斗冷却与挥砍动画 ——
 	_update_combat(dt)
+
+
+func _dry_support() -> bool:
+	if global_position.y < _water_level + 0.15:
+		return false
+	var query := PhysicsRayQueryParameters3D.create(global_position + Vector3.UP * 0.12,
+		global_position - Vector3.UP * 0.38, 5)
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	return not hit.is_empty() and hit.normal.y > 0.6 and hit.position.y > _water_level + 0.15
+
+
+func _try_step(motion: Vector3) -> void:
+	# 只对真正的低台阶抬脚：先确认平移受阻，再验证上方净空和落脚面。
+	if not test_move(global_transform, motion):
+		return
+	var raised := global_transform
+	if test_move(raised, Vector3.UP * STEP_HEIGHT):
+		return
+	raised.origin.y += STEP_HEIGHT
+	if test_move(raised, motion):
+		return
+	var forward := raised.origin + motion + motion.normalized() * 0.38
+	var query := PhysicsRayQueryParameters3D.create(forward,
+		forward - Vector3.UP * (STEP_HEIGHT + 0.06), 1)
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	if hit.is_empty() or hit.normal.y < cos(floor_max_angle):
+		return
+	var rise: float = hit.position.y - global_position.y
+	if rise > 0.015 and rise <= STEP_HEIGHT:
+		global_position.y += rise + 0.015
+
+
+func _push_props(dt: float) -> void:
+	var horizontal := Vector3(velocity.x, 0, velocity.z)
+	if horizontal.length() < 0.1:
+		return
+	var collision := KinematicCollision3D.new()
+	if not test_move(global_transform, horizontal.normalized() * 0.12, collision):
+		return
+	var body := collision.get_collider() as RigidBody3D
+	if body != null:
+		var normal := -collision.get_normal()
+		normal.y = 0.0
+		if normal.length() > 0.01:
+			body.apply_central_impulse(normal.normalized() * minf(horizontal.length(), 6.0) * dt * 24.0)
+
+
+func restore_motion(pos: Vector3, saved_velocity := Vector3.ZERO) -> void:
+	global_position = pos
+	velocity = saved_velocity
+	_last_physics_pos = pos
+	jump_v = saved_velocity.y
+	_jump_was_pressed = Input.is_key_pressed(KEY_SPACE)
+	# move_and_slide 的贴地状态仍属于传送前一帧，恢复时必须重新检测。
+	_motion_restored = true
 
 
 # ——————————————— 战斗 ———————————————
