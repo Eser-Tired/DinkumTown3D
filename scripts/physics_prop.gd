@@ -55,7 +55,7 @@ func configure(p_kind: String, terr: Node3D) -> void:
 				mesh.size = Vector3(1.0, 0.08, 0.04)
 				slat.mesh = mesh
 				slat.position = Vector3(0, y, z)
-				slat.material_override = PropsS.surface("wood", PropsS.C_WOOD_DARK)
+				slat.material_override = PropsS.Surfaces.for_box(PropsS.surface("wood", PropsS.C_WOOD_DARK), mesh.size)
 				add_child(slat)
 
 

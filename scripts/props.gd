@@ -35,7 +35,7 @@ static func mat(color: Color, rough := 0.92, metal := 0.0) -> StandardMaterial3D
 	return m
 
 
-static func surface(kind: String, color: Color, rough := 0.9, metal := 0.0) -> StandardMaterial3D:
+static func surface(kind: String, color: Color, rough := 0.9, metal := 0.0) -> Material:
 	return Surfaces.surface(kind, color, rough, metal)
 
 
@@ -62,7 +62,7 @@ static func _mi(mesh: Mesh, m: Material, pos := Vector3.ZERO, rot := Vector3.ZER
 static func _box(size: Vector3, m: Material, pos := Vector3.ZERO, rot := Vector3.ZERO) -> MeshInstance3D:
 	var b := BoxMesh.new()
 	b.size = size
-	return _mi(b, m, pos, rot)
+	return _mi(b, Surfaces.for_box(m, size), pos, rot)
 
 
 static func _cyl(r: float, h: float, m: Material, pos := Vector3.ZERO, rot := Vector3.ZERO, seg := 8) -> MeshInstance3D:

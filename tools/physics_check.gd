@@ -174,8 +174,9 @@ func _run() -> void:
 	_ok(p.velocity.y < -2.0 and p.global_position.y < char_pos.y,
 		"空中角色恢复运动状态后继续下落")
 
-	var wood: StandardMaterial3D = load("res://scripts/props.gd").surface("wood", Color(0.54, 0.38, 0.25))
-	_ok(wood.albedo_texture != null and wood.normal_texture != null, "木材有颜色和法线纹理")
+	var wood: ShaderMaterial = load("res://scripts/props.gd").surface("wood", Color(0.54, 0.38, 0.25))
+	_ok(wood.get_shader_parameter("detail_map") != null and wood.get_shader_parameter("normal_map") != null,
+		"木材有颜色和法线纹理")
 	var shape_before = t.ground_body.get_node("Shape").shape
 	t.apply_season_tint(Color(1, 0.8, 0.4), 0.4)
 	_ok(t.ground_body.get_node("Shape").shape == shape_before, "季节染色不重建物理地形")

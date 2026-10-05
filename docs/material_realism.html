@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dinkum Town · 材质升级验收</title>
+<style>
+:root{color-scheme:light dark;--bg:#f7f4ed;--card:#fff;--fg:#252c34;--muted:#5a6672;--line:#d4dbe2;--accent:#825729}
+@media(prefers-color-scheme:dark){:root{--bg:#151c25;--card:#202b37;--fg:#efede7;--muted:#bcc8d5;--line:#3a4857;--accent:#eec487}}
+html[data-theme="light"]{color-scheme:light;--bg:#f7f4ed;--card:#fff;--fg:#252c34;--muted:#5a6672;--line:#d4dbe2;--accent:#825729}html[data-theme="dark"]{color-scheme:dark;--bg:#151c25;--card:#202b37;--fg:#efede7;--muted:#bcc8d5;--line:#3a4857;--accent:#eec487}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.75 'Microsoft YaHei',sans-serif}main{max-width:1180px;margin:auto;padding:62px 24px}h1{font-size:31px;line-height:1.4}h2{font-size:23px;margin-top:32px}p{max-width:950px}strong,a{color:var(--accent)}button,select{padding:8px 14px;font:inherit;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);cursor:pointer}#theme{position:fixed;right:18px;top:16px;z-index:9}.card{padding:20px;border:1px solid var(--line);border-radius:12px;background:var(--card)}.controls{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:15px 0}input{width:100%;accent-color:var(--accent)}.compare{position:relative;aspect-ratio:16/9;overflow:hidden;background:#0f1720;border-radius:9px}.compare img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}.compare #before{clip-path:inset(0 calc(100% - var(--cut,50%)) 0 0)}.handle{position:absolute;top:0;bottom:0;left:var(--cut,50%);width:2px;background:#fff;pointer-events:none}.tag{position:absolute;top:12px;padding:3px 10px;background:#101820c9;color:#fff;border-radius:5px;font-size:14px}.left{left:12px}.right{right:12px}.note{font-size:15px;color:var(--muted)}table{border-collapse:collapse;width:100%}td,th{padding:11px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}.overflow{overflow:auto}code{font:15px Consolas,monospace}@media(max-width:700px){main{padding:60px 14px}h1{font-size:25px}body{font-size:16px}}
+</style></head><body><button id="theme" aria-label="切换深色或浅色主题">切换主题</button><main>
+<h1>地面、木材与铁皮已接入更细致的材质</h1>
+<p>保留当前低多边形造型，通过<strong>细节法线、粗糙度变化、木纹方向和金属分区</strong>增强表面真实感。所有纹理由程序生成，按种类共享；木材和铁皮提升到 512×512，其余保持 128×128。</p>
+<h2>拖动查看真实游戏前后对比</h2>
+<div class="controls"><label for="scene">查看场景</label><select id="scene"><option value="wood_detail">木板近景</option><option value="iron_detail">铁皮近景</option><option value="ground_dry">干燥地面</option><option value="ground_wet">湿润地面</option><option value="town">小镇中景</option></select><button id="reset">对半比较</button></div>
+<div class="compare" id="compare"><img id="after" src="shots/realism_after_wood_detail.png" alt="升级后的木板"><img id="before" src="shots/realism_before_wood_detail.png" alt="升级前的木板"><div class="handle"></div><span class="tag left">升级前</span><span class="tag right">升级后</span></div>
+<label for="split">对比位置</label><input id="split" aria-label="调整前后截图分割位置" type="range" min="0" max="100" value="50">
+<p class="note">固定地图种子 20260921、相同机位、视场角 58°、游戏时刻 0.39、1440×810。木板和铁皮样板调用正式游戏使用的材质工厂。动态动物位置可能因帧时序略有差异；光照参数保持相同。</p>
+<h2>改动带来的具体效果</h2>
+<div class="card overflow"><table><thead><tr><th>部分</th><th>最终实现</th></tr></thead><tbody>
+<tr><td>木材</td><td>扭曲木纹、结疤、毛孔与局部粗糙度。纹理沿构件本地最长边排列，构件旋转后方向仍正确；截面使用年轮。</td></tr>
+<tr><td>铁皮</td><td>保留波纹，增加掉漆、锈迹、裸露金属与对应反射参数；旧金属保持划痕带来的粗糙度。整张贴图 37×37 采样的掉漆权重均值为 6.15%，漆面占主体。</td></tr>
+<tr><td>地面</td><td>增加多尺度、不同方向的微凹凸与连续土色变化，陡坡混入岩石色。近景有砂粒，远景细节淡出；湿土变暗并降低粗糙度，湿草保留较哑光的表面。</td></tr>
+<tr><td>资源与渲染</td><td>六类纹理共用缓存，物体颜色与木纹方向不会产生新纹理。法线采用周期邻域生成，纹理带 mipmaps；世界坐标差分避免在地形网格边缘产生法线伪影。</td></tr>
+</tbody></table></div>
+<h2>验证结果</h2>
+<div class="card overflow"><table><tr><th>检查</th><th>结果</th></tr><tr><td>材质检查</td><td>8265 项断言，fails=0；Forward+ 与 Mobile 渲染模式均验证。检查二维纹理样本、有效法线、缓存、粗糙度变化、木纹方向、金属分区与干湿变化。</td></tr><tr><td>游戏回归</td><td>物理 23/23、战斗 102/102、水域 37/37；室内、端到端检查均为 fails=0。</td></tr><tr><td>界面回归</td><td>UI 1907 项通过；8 种横竖屏触控分辨率均为 bad=0。</td></tr><tr><td>实际截图</td><td>木板、铁皮、地面干湿状态和小镇中景均已查看；Godot 导入无脚本解析错误，真实渲染无 shader 错误。</td></tr></table></div>
+<h2>性能取舍</h2>
+<div class="card overflow"><table><thead><tr><th>本机采样</th><th>升级前</th><th>升级后</th></tr></thead><tbody><tr><td>headless 世界创建，两次串行独立进程平均</td><td>13.84 秒</td><td>14.84 秒（约 +1 秒）</td></tr><tr><td>渲染内存统计</td><td>192.79 MiB</td><td>200.80 MiB（+8.01 MiB）</td></tr><tr><td>窗口主循环帧间隔中位数，240 帧</td><td>5.54 ms</td><td>5.57 ms</td></tr><tr><td>相同采样的 P95 帧间隔</td><td>6.38 ms</td><td>7.21 ms</td></tr></tbody></table></div>
+<p class="note">Godot 4.7.2 / Windows / RTX 5060 Laptop。帧间隔包含主循环与显示同步，不能当作独立 GPU 耗时；采样量较小。材质首次生成约 0.67 秒，之后复用缓存。Mobile 模式在桌面显卡运行，手机实机性能尚未验证。</p>
+<h2>复查入口</h2>
+<p><code>tools/materials_check.tscn</code> 在窗口模式运行，用渲染器读回纹理；<code>tools/realism_shot.tscn</code> 生成固定条件截图并采样性能，可通过 <code>-- --dir res://realism_shots/</code> 指定目录。加 <code>-- --build-only</code> 时只计世界创建耗时，可在 headless 运行。</p>
+<p class="note">2026-10-05 · 升级前基于 main 的 bb7cf04。测试和截图使用隔离副本，避免影响真实存档。</p>
+</main><script>
+const html=document.documentElement;const remembered=localStorage.getItem('realism-report-theme');if(remembered==='dark'||remembered==='light')html.dataset.theme=remembered;
+document.getElementById('theme').onclick=()=>{const mode=html.dataset.theme||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');html.dataset.theme=mode==='dark'?'light':'dark';localStorage.setItem('realism-report-theme',html.dataset.theme)};
+const split=document.getElementById('split');const compare=document.getElementById('compare');const update=()=>compare.style.setProperty('--cut',split.value+'%');split.addEventListener('input',update);document.getElementById('reset').onclick=()=>{split.value=50;update()};
+document.getElementById('scene').addEventListener('change',event=>{const name=event.target.value;document.getElementById('before').src='shots/realism_before_'+name+'.png';document.getElementById('after').src='shots/realism_after_'+name+'.png';document.getElementById('before').alt='升级前：'+event.target.selectedOptions[0].text;document.getElementById('after').alt='升级后：'+event.target.selectedOptions[0].text});update();
+</script></body></html>
