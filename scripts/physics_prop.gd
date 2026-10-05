@@ -11,7 +11,8 @@ var _pending_restore: Dictionary = {}
 
 func configure(p_kind: String, terr: Node3D, p_visual := "") -> void:
 	kind = p_kind
-	visual = "emace_crate" if kind == "crate" and p_visual == "emace_crate" else ""
+	# 旧试换存档及无外观字段的存档统一按种类迁移，质量和运动状态不变。
+	visual = "emace_" + kind if p_visual == "" or p_visual.begins_with("emace_") else p_visual
 	terrain = terr
 	collision_layer = 4
 	collision_mask = 7
@@ -47,7 +48,12 @@ func configure(p_kind: String, terr: Node3D, p_visual := "") -> void:
 		shape.size = mesh.size
 		shape_node.shape = shape
 	mi.material_override = PropsS.surface("wood", PropsS.C_WOOD_LIGHT if kind == "crate" else PropsS.C_WOOD)
-	var replacement: Node3D = OptionalAssets.instantiate("crate") if visual == "emace_crate" else null
+	var dimensions := Vector3.ONE * 0.95
+	if kind == "barrel":
+		dimensions = Vector3(0.9, 1.1, 0.9)
+	elif kind == "log":
+		dimensions = Vector3(1.65, 0.56, 0.56)
+	var replacement: Node3D = OptionalAssets.fitted(kind, dimensions) if visual == "emace_" + kind else null
 	if replacement != null:
 		replacement.name = "AssetVisual"
 		add_child(replacement)

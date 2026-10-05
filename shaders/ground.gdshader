@@ -2,6 +2,10 @@ shader_type spatial;
 
 uniform float wetness : hint_range(0.0, 1.0) = 0.0;
 uniform float water_level = 0.0;
+uniform bool use_asset_ground = false;
+uniform sampler2D grass_map : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D earth_map : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D grass_normal : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;
 varying vec3 world_pos;
 varying float slope;
 varying vec3 world_normal;
@@ -50,6 +54,11 @@ void fragment() {
 	base = mix(base, vec3(0.39, 0.35, 0.29), rock * 0.45);
 	base *= 0.83 + grit * 0.22 + pores * 0.08;
 	base += vec3(0.026, 0.022, 0.017) * flecks;
+	if (use_asset_ground) {
+		// 贴图只替换外观，顶点色仍决定季节/坡地/岸边；不修改水域与高度真值。
+		vec3 ground_tex = mix(texture(earth_map, p / 4.0).rgb, texture(grass_map, p / 4.0).rgb, grass * (1.0 - rock));
+		base = ground_tex * mix(vec3(1.0), COLOR.rgb * 1.8, 0.35);
+	}
 	float damp = max(shore * 0.8, wetness * (0.55 + patches * 0.45));
 	// 积水优先出现在较平的裸土；湿草仍保持较粗糙，不能整张草原变成镜面。
 	float puddle = wetness * smoothstep(0.60, 0.80, pores) * (1.0 - grass) * (1.0 - rock);
@@ -64,6 +73,10 @@ void fragment() {
 	vec3 gradient = vec3((micro_height(p + vec2(0.01, 0.0), detail_fade) - height) / 0.01,
 		0.0, (micro_height(p + vec2(0.0, 0.01), detail_fade) - height) / 0.01);
 	vec3 original = normalize(world_normal);
+	if (use_asset_ground) {
+		vec3 tex_normal = texture(grass_normal, p / 4.0).rgb * 2.0 - 1.0;
+		gradient += vec3(tex_normal.x, 0.0, tex_normal.y) * grass * 0.18 * detail_fade;
+	}
 	gradient -= original * dot(gradient, original);
 	vec3 bumped = normalize(original - gradient);
 	NORMAL = normalize((VIEW_MATRIX * vec4(bumped, 0.0)).xyz);

@@ -16,7 +16,7 @@ func _ready() -> void:
 	await _run()
 	# 协程中途脚本错误也会返回 _ready，必须防止少跑断言却打印成功。
 	var installed := ResourceLoader.exists(Assets.DIRECTORY + "hut.scn") and not OS.get_cmdline_user_args().has("--no-emace")
-	_ok(checks == (24 if installed else 18), "完整执行预期数量的验收断言")
+	_ok(checks == (33 if installed else 27), "完整执行预期数量的验收断言")
 	print("==== EMACE CHECK DONE checks=%d fails=%d ====" % [checks, fails])
 	get_tree().quit(1 if fails else 0)
 
@@ -38,17 +38,17 @@ func _run() -> void:
 	var hut: Node3D = m.get_node("SampleHut")
 	var h: Dictionary = m.houses[1]
 	_ok(m.houses.size() == 7 and h.id == "hut_0", "建筑数量与稳定ID保持一致")
-	_ok(hut.has_meta("asset_id") == installed, "仅第一栋小屋使用资源包或缺包回退")
+	_ok(hut.has_meta("asset_id") == installed, "小屋使用资源包或缺包回退")
 	var asset_nodes := 0
 	for node in m.get_children():
 		if node.has_meta("asset_id"):
 			asset_nodes += 1
-	_ok(asset_nodes == int(installed), "镇上没有扩大建筑替换范围")
+	_ok(asset_nodes == 4 * int(installed), "三栋小屋与商店全部替换")
 	_ok(hut.find_children("*", "StaticBody3D", true, false).size() == 1, "小屋只有一套实体碰撞")
 	var crate: RigidBody3D = m.physics_props[0]
 	_ok(crate.has_node("AssetVisual") == installed, "第一只木箱使用资源包或缺包回退")
-	_ok(not m.physics_props[1].has_node("AssetVisual"), "第二只木箱仍使用现有外观")
-	_ok(crate.mass == 9.0 and crate.collision_layer == 4 and crate.collision_mask == 7, "试换木箱保持质量与物理层")
+	_ok(m.physics_props[1].has_node("AssetVisual") == installed, "第二只木箱同步替换或缺包回退")
+	_ok(crate.mass == 9.0 and crate.collision_layer == 4 and crate.collision_mask == 7, "木箱保持质量与物理层")
 	var shape: BoxShape3D = crate.find_children("*", "CollisionShape3D", true, false)[0].shape
 	_ok(shape.size.is_equal_approx(Vector3.ONE * 0.95), "木箱保留0.95米碰撞盒")
 	if installed:
@@ -103,7 +103,7 @@ func _run() -> void:
 		GameBus.touch_move = Vector2.ZERO
 		_ok(hut.to_local(m.player.global_position).x < -1.4 and m.player.is_on_floor() and str(m._door_target().get("id", "")) == "hut_0", "玩家可上门廊并横移到真实门前")
 	var data: Array = m._serialize_props()
-	_ok(str(data[0].get("visual", "")) == "emace_crate", "存档保存试换木箱的外观身份")
+	_ok(str(data[0].get("visual", "")) == "emace_crate", "存档保存木箱的外观身份")
 	m._restore_props(data)
 	await _wait(0.1)
 	_ok(m.physics_props[0].has_node("AssetVisual") == installed, "读档恢复第一只木箱的外观")
@@ -111,4 +111,16 @@ func _run() -> void:
 		entry.erase("visual")
 	m._restore_props(data)
 	await _wait(0.1)
-	_ok(m.physics_props.size() == data.size() and m.physics_props[0].visual == "emace_crate" and m.physics_props[1].visual == "", "旧存档仅迁移第一只木箱且数量不变")
+	_ok(m.physics_props.size() == data.size() and m.physics_props[0].visual == "emace_crate" and m.physics_props[1].visual == "emace_crate", "旧存档全部迁移外观且数量不变")
+	for index in [0, 2, 3]:
+		var house: Dictionary = m.houses[index]
+		var exit: Vector2 = house.get("exit_point", InteriorS.exit_point(house.pos, house.rot, house.kind))
+		m.player.restore_motion(Vector3(exit.x, m.terrain.height_at(exit.x, exit.y) + 0.1, exit.y))
+		await _wait(0.4)
+		_ok(str(m._door_target().get("id", "")) == house.id and m.player.is_on_floor(), house.id + "出口站稳并能触发真实门")
+		m._interact()
+		await _wait(0.8)
+		_ok(m.house_id == house.id and m.player.indoor, house.id + "可进入")
+		m._exit_house()
+		await _wait(0.8)
+		_ok(not m.player.indoor and m.house_id == "" and Vector2(m.player.global_position.x, m.player.global_position.z).distance_to(exit) < 0.08, house.id + "可退出并回到新门廊外")

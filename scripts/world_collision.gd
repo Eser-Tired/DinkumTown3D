@@ -88,7 +88,7 @@ static func _add_cylinder_wall(body: StaticBody3D, mesh: CylinderMesh, xform: Tr
 
 
 static func _collect(node: Node, out: Array[MeshInstance3D]) -> void:
-	if node.has_meta("bob") or node.has_meta("spin") or node.has_meta("flicker"):
+	if node.has_meta("visual_only") or node.has_meta("bob") or node.has_meta("spin") or node.has_meta("flicker"):
 		return
 	if node is MeshInstance3D and node.mesh != null:
 		out.append(node)

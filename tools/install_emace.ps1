@@ -19,15 +19,15 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $packRoot 'LICENSE.txt'))) {
         throw 'ZIP不含SlavicWorldFree/LICENSE.txt，请从原作者页面下载指定资源包。'
     }
-    Write-Host '导入原包供Godot解析，随后仅保留一栋房屋和一个木箱。首次导入可能需要几分钟。'
+    Write-Host '导入原包供Godot解析，随后转换建筑、自然物、道具、家具和地面贴图。首次导入可能需要几分钟。'
     # Start-Process显式等待，兼容GUI版Godot.exe；目录有空格时必须保留参数引号。
     $importArgs = @('--headless', '--editor', '--path', ('"' + $packRoot + '"'), '--quit')
     $importProcess = Start-Process -FilePath $engineFile -ArgumentList $importArgs -WindowStyle Hidden -Wait -PassThru
     if ($importProcess.ExitCode -ne 0) { throw '资源包导入失败。' }
     $convertArgs = @('--headless', '--path', ('"' + $packRoot + '"'), '--script', ('"' + (Join-Path $PSScriptRoot 'emace_import.gd') + '"'), '--', '--output', ('"' + $destination + '"'))
     $convertProcess = Start-Process -FilePath $engineFile -ArgumentList $convertArgs -WindowStyle Hidden -Wait -PassThru
-    if ($convertProcess.ExitCode -ne 0) { throw '试换素材转换失败。' }
-    foreach ($required in @('hut.scn', 'crate.scn', 'LICENSE.txt')) {
+    if ($convertProcess.ExitCode -ne 0) { throw '素材转换失败。' }
+    foreach ($required in @('hut.scn', 'shop.scn', 'crate.scn', 'barrel.scn', 'tree.scn', 'tree_alt.scn', 'bush_alt.scn', 'rock.scn', 'rock_alt.scn', 'grass.scn', 'beam.scn', 'post.scn', 'fence.scn', 'stump.scn', 'log.scn', 'bed.scn', 'table.scn', 'chair.scn', 'shelf.scn', 'stove.scn', 'bag.scn', 'cup.scn', 'bottle.scn', 'ground_grass.res', 'ground_earth.res', 'ground_normal.res', 'manifest.json', 'LICENSE.txt')) {
         if (-not (Test-Path -LiteralPath (Join-Path $destination $required))) { throw "缺少输出：$required" }
     }
     Write-Host "已安装到 $destination。该目录已被Git忽略；原作者许可禁止独立素材再分发。"

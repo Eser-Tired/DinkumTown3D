@@ -21,7 +21,6 @@ const InteriorS := preload("res://scripts/interior.gd")
 const SleepS := preload("res://scripts/sleep_panel.gd")
 const CollisionS := preload("res://scripts/world_collision.gd")
 const PhysicsPropS := preload("res://scripts/physics_prop.gd")
-const OptionalAssets := preload("res://scripts/optional_assets.gd")
 
 const TOWN := Vector2(-14.0, -10.0)
 const LAKE := Vector2(48.0, 22.0)
@@ -508,6 +507,19 @@ func _collect_anims(root: Node) -> void:
 
 
 # ——————————————— 小镇 ———————————————
+func _adapt_house_entry(model: Node3D) -> void:
+	if not model.has_meta("entrance_origin"):
+		return
+	# 房屋和商店都按网格实测的侧门/台阶更新，不能只迁移第一栋入口。
+	var offset: Vector2 = model.get_meta("entrance_origin")
+	var origin: Vector3 = model.transform * Vector3(offset.x, 0, offset.y)
+	houses[-1]["entrance_origin"] = Vector2(origin.x, origin.z)
+	var exit_world := model.transform * Vector3(float(model.get_meta("stair_x")), 0, float(model.get_meta("exit_distance")))
+	houses[-1]["exit_point"] = Vector2(exit_world.x, exit_world.z)
+	if houses[-1]["kind"] == "hut":
+		houses[-1]["title"] = "木顶小屋"
+
+
 func _build_town() -> void:
 	var c := TOWN
 
@@ -517,10 +529,12 @@ func _build_town() -> void:
 	# 杂货铺
 	var shop_p := c + Vector2(14, -9)
 	var shop_rot := _face_to(shop_p, c)
-	_place(PropsS.make_shop(), shop_p.x, shop_p.y, shop_rot)
+	var shop := PropsS.make_shop()
+	_place(shop, shop_p.x, shop_p.y, shop_rot)
 	_register_house("shop", shop_p, shop_rot, 0)
+	_adapt_house_entry(shop)
 
-	# 第一栋试用本地安装的资源包，另外两栋仍用现有外观。
+	# 所有小屋共用资源工厂；缺包时自动恢复程序化外观。
 	var huts := [
 		[Vector2(-12, -13), PropsS.C_IRON_RED],
 		[Vector2(-4, 11), PropsS.C_IRON_GREEN],
@@ -533,22 +547,12 @@ func _build_town() -> void:
 		# _face_to(p, c) 正好把 +Z 转向镇中心。原来小屋多转了 PI，三间屋子集体
 		# 背对广场，玩家从中心走过去只看到没门的后墙——能进屋之后这就很致命。
 		var rot := _face_to(p, c)
-		var hut: Node3D = OptionalAssets.instantiate("hut") if i == 0 else null
-		if hut == null:
-			hut = PropsS.make_hut(it[1])
+		var hut := PropsS.make_hut(it[1])
 		if i == 0:
 			hut.name = "SampleHut"
 		_place(hut, p.x, p.y, rot)
 		_register_house("hut", p, rot, i)
-		if hut.has_meta("entrance_origin"):
-			# 原包门偏在侧边，旋转后仍不能把房屋中心作为交互中心。
-			var offset: Vector2 = hut.get_meta("entrance_origin")
-			var origin: Vector3 = hut.transform * Vector3(offset.x, 0, offset.y)
-			houses[-1]["entrance_origin"] = Vector2(origin.x, origin.z)
-			var exit_local := Vector3(float(hut.get_meta("stair_x", offset.x)), 0, float(hut.get_meta("exit_distance")))
-			var exit_world := hut.transform * exit_local
-			houses[-1]["exit_point"] = Vector2(exit_world.x, exit_world.z)
-			houses[-1]["title"] = "木顶小屋"
+		_adapt_house_entry(hut)
 
 	# 帐篷营地：三顶都能进
 	# 【为什么不再用随机朝向】帐篷的门帘做在模型局部 +Z 侧，随机转一圈意味着
@@ -1606,17 +1610,15 @@ func _restore_props(data: Variant) -> void:
 			prop.collision_mask = 0
 			prop.queue_free()
 	physics_props.clear()
-	var first_crate := true
+
 	for entry in data:
 		if not entry is Dictionary or physics_props.size() >= MAX_PHYSICS_PROPS:
 			continue
 		var kind := str(entry.get("kind", "crate"))
 		if not kind in ["crate", "barrel", "log"]:
 			continue
-		# 老存档没有 visual 字段；只迁移第一只箱子的外观，不改变数量或物理状态。
-		var visual := str(entry.get("visual", "emace_crate" if kind == "crate" and first_crate else ""))
-		if kind == "crate":
-			first_crate = false
+		# 外观按种类迁移，不改变存档中的道具数量与运动状态。
+		var visual := str(entry.get("visual", "emace_" + kind))
 		var body := _spawn_prop(kind, PhysicsPropS._read_vec(entry.get("pos", [])), visual)
 		if body != null:
 			body.restore(entry)

@@ -47,6 +47,39 @@ func _ready() -> void:
 	camera.global_position = Vector3(c.x + 21, ground + 15, c.y + 25)
 	camera.look_at(Vector3(c.x - 2, ground + 1.0, c.y - 5))
 	await _shot("town")
+	var tree: Node3D
+	for resource in m.resources:
+		if resource.get_meta("resource") == "wood":
+			tree = resource
+			break
+	camera.global_position = tree.global_position + Vector3(8, 6, 12)
+	camera.look_at(tree.global_position + Vector3(0, 3.5, 0))
+	await _shot("forest")
+	camera.global_position = Vector3(c.x + 4, ground + 1.6, c.y + 8)
+	camera.look_at(Vector3(c.x + 2, ground, c.y + 4))
+	await _shot("ground")
+	var fence: Node3D = m._make_build("fence")
+	m.add_child(fence)
+	fence.position = Vector3(c.x + 3, m.terrain.height_at(c.x + 3, c.y + 8), c.y + 8)
+	camera.global_position = fence.position + Vector3(5, 2.5, 5)
+	camera.look_at(fence.position + Vector3(0, 0.6, 0))
+	await _shot("fence")
+	fence.queue_free()
+	for body in m.physics_props:
+		if body.kind == "barrel" or body.kind == "log":
+			camera.global_position = body.global_position + Vector3(2.5, 1.5, 2.5)
+			camera.look_at(body.global_position)
+			await _shot(body.kind)
+			if body.kind == "log":
+				break
+	for kind in ["hut", "shop"]:
+		var space: Dictionary = m.interior.ensure("shot_" + kind, kind, m.map_seed)
+		m.interior.show_only("shot_" + kind)
+		var room: Node3D = space.node
+		camera.global_position = room.position + Vector3(0.0, 2.4, 2.5 if kind == "hut" else 3.1)
+		camera.look_at(room.position + Vector3(0, 1.0, -1.2))
+		await _shot("interior_" + kind)
+	m.interior.hide_all()
 	print("==== EMACE SHOT DONE ====")
 	get_tree().quit()
 

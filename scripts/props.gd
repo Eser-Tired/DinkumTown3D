@@ -1,6 +1,6 @@
 extends RefCounted
 class_name Props
-## 建筑与道具工厂：全部用 PrimitiveMesh 拼装的低多边形模型
+## 建筑与道具工厂：可选本地美术与缺包时的程序化外观共用玩法入口。
 ## 每个 make_* 返回模型；正式放置时由 world_collision.gd 添加实体碰撞。
 ## collide_radius 只用于建筑占地检查。
 
@@ -19,6 +19,7 @@ const C_ROPE      := Color(0.62, 0.53, 0.38)
 static var _mats := {}
 static var _meshes := {}
 const Surfaces := preload("res://scripts/materials.gd")
+const Assets := preload("res://scripts/optional_assets.gd")
 
 
 static func mat(color: Color, rough := 0.92, metal := 0.0) -> StandardMaterial3D:
@@ -56,13 +57,18 @@ static func _mi(mesh: Mesh, m: Material, pos := Vector3.ZERO, rot := Vector3.ZER
 	mi.position = pos
 	mi.rotation = rot
 	mi.scale = scl
+	if m.get_meta("surface_kind", "") == "stone":
+		Assets.cover_mesh(mi, "rock")
 	return mi
 
 
 static func _box(size: Vector3, m: Material, pos := Vector3.ZERO, rot := Vector3.ZERO) -> MeshInstance3D:
 	var b := BoxMesh.new()
 	b.size = size
-	return _mi(b, Surfaces.for_box(m, size), pos, rot)
+	var mi := _mi(b, Surfaces.for_box(m, size), pos, rot)
+	if m.get_meta("surface_kind", "") == "wood":
+		Assets.cover_mesh(mi, "beam")
+	return mi
 
 
 static func _cyl(r: float, h: float, m: Material, pos := Vector3.ZERO, rot := Vector3.ZERO, seg := 8) -> MeshInstance3D:
@@ -72,7 +78,10 @@ static func _cyl(r: float, h: float, m: Material, pos := Vector3.ZERO, rot := Ve
 	c.height = h
 	c.radial_segments = seg
 	c.rings = 1
-	return _mi(c, m, pos, rot)
+	var mi := _mi(c, m, pos, rot)
+	if m.get_meta("surface_kind", "") in ["wood", "bark"]:
+		Assets.cover_mesh(mi, "post")
+	return mi
 
 
 ## Godot 4.7 已移除 ConeMesh，用 top_radius=0 的圆柱代替
@@ -119,6 +128,9 @@ static func make_tent() -> Node3D:
 
 # ——————————————— 铁皮顶木屋 ———————————————
 static func make_hut(roof_col := C_IRON_RED) -> Node3D:
+	var model := Assets.instantiate("hut")
+	if model != null:
+		return model
 	var root := Node3D.new()
 	var w := 5.0
 	var d := 4.2
@@ -145,6 +157,16 @@ static func make_hut(roof_col := C_IRON_RED) -> Node3D:
 
 # ——————————————— 杂货铺 / 商店 ———————————————
 static func make_shop() -> Node3D:
+	var model := Assets.instantiate("shop")
+	if model != null:
+		# 商店仍有独立招牌，避免放大同款房屋后失去用途辨识。
+		var sign := Label3D.new()
+		sign.text = "杂货铺"
+		sign.font_size = 64
+		sign.pixel_size = 0.016
+		sign.position = Vector3(0, 3.8, 3.5)
+		model.add_child(sign)
+		return model
 	var root := Node3D.new()
 	var w := 8.0
 	var d := 6.0
@@ -276,6 +298,7 @@ static func make_fence(len := 4.0, rails := 2) -> Node3D:
 	for r in rails:
 		root.add_child(_box(Vector3(len, 0.12, 0.10), surface("wood", C_WOOD), Vector3(0, 0.5 + float(r) * 0.5, 0)))
 	root.set_meta("collide_radius", 0.0)
+	Assets.replace_group(root, "fence", Vector3(len, 1.3, 0.20), Vector3(0, 0.65, 0))
 	return root
 
 
@@ -290,10 +313,13 @@ static func make_campfire() -> Node3D:
 		s.radial_segments = 6
 		s.rings = 3
 		root.add_child(_mi(s, surface("stone", C_STONE), Vector3(cos(a) * 1.05, 0.13, sin(a) * 1.05)))
+	var firewood := Node3D.new()
 	for i in 4:
 		var a := TAU * float(i) / 4.0
-		root.add_child(_box(Vector3(1.5, 0.16, 0.16), surface("wood", C_WOOD_DARK),
+		firewood.add_child(_box(Vector3(1.5, 0.16, 0.16), surface("wood", C_WOOD_DARK),
 			Vector3(0, 0.22, 0), Vector3(0.16, a, 0.22)))
+	Assets.replace_group(firewood, "firewood", Vector3(1.5, 0.35, 1.5), Vector3(0, 0.225, 0))
+	root.add_child(firewood)
 	var flame_mi := _cone(0.45, 1.3, glow_mat(Color(1.0, 0.52, 0.14)), Vector3(0, 0.85, 0), Vector3.ZERO, 6)
 	flame_mi.set_meta("flicker", 1.0)
 	root.add_child(flame_mi)
@@ -411,5 +437,8 @@ static func make_crates() -> Node3D:
 	barrel.height = 1.1
 	barrel.radial_segments = 8
 	root.add_child(_mi(barrel, mat(Color(0.45, 0.31, 0.20)), Vector3(1.7, 0.55, -0.6)))
+	for child in root.get_children():
+		if child is MeshInstance3D:
+			Assets.cover_mesh(child, "barrel" if child.mesh is CylinderMesh else "crate")
 	root.set_meta("collide_radius", 1.2)
 	return root

@@ -125,15 +125,22 @@ func apply_season_tint(tint: Color, amount: float) -> void:
 	if ground_mi != null:
 		ground_mi.mesh = _ground_mesh()
 	for m in tintables:
-		if m is StandardMaterial3D:
-			m.albedo_color = Color(1.0, 1.0, 1.0).lerp(season_tint, season_amt * 0.65)
+		_tint_material(m)
+
+
+func _tint_material(m: Material) -> void:
+	var tint := Color.WHITE.lerp(season_tint, season_amt * 0.65)
+	if m is StandardMaterial3D:
+		m.albedo_color = tint
+	elif m is ShaderMaterial:
+		m.set_shader_parameter("base_color", tint)
 
 
 ## 注册一个随季节变色的材质（main 里给干草地被用）
 func register_tintable(m: Material) -> void:
 	if m != null and not tintables.has(m):
 		tintables.append(m)
-		m.set("albedo_color", Color(1.0, 1.0, 1.0).lerp(season_tint, season_amt * 0.65))
+		_tint_material(m)
 
 
 # ——————————————— 河道路径 ———————————————
@@ -357,6 +364,15 @@ func _ground_material() -> ShaderMaterial:
 	var mat := ShaderMaterial.new()
 	mat.shader = preload("res://shaders/ground.gdshader")
 	mat.set_shader_parameter("water_level", WATER_Y)
+	var assets := preload("res://scripts/optional_assets.gd")
+	var grass := assets.texture("ground_grass")
+	var earth := assets.texture("ground_earth")
+	var normal := assets.texture("ground_normal")
+	mat.set_shader_parameter("use_asset_ground", grass != null and earth != null and normal != null)
+	if grass != null and earth != null and normal != null:
+		mat.set_shader_parameter("grass_map", grass)
+		mat.set_shader_parameter("earth_map", earth)
+		mat.set_shader_parameter("grass_normal", normal)
 	return mat
 
 

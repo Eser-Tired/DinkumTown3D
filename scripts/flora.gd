@@ -3,6 +3,7 @@ class_name Flora
 ## 澳洲内陆植被：桉树 / 金合欢 / 棕榈 / 灌木 / 干草 / 岩石 / 铁矿
 
 const M := preload("res://scripts/props.gd")
+const Assets := preload("res://scripts/optional_assets.gd")
 
 
 static func _mi(mesh: Mesh, m: Material, pos := Vector3.ZERO, rot := Vector3.ZERO, scl := Vector3.ONE) -> MeshInstance3D:
@@ -12,6 +13,8 @@ static func _mi(mesh: Mesh, m: Material, pos := Vector3.ZERO, rot := Vector3.ZER
 	mi.position = pos
 	mi.rotation = rot
 	mi.scale = scl
+	if m.get_meta("surface_kind", "") == "bark":
+		Assets.cover_mesh(mi, "post")
 	return mi
 
 
@@ -60,6 +63,8 @@ static func make_eucalyptus(rng: RandomNumberGenerator, scale := 1.0) -> Node3D:
 	root.set_meta("collide_radius", 0.95 * scale)
 	root.set_meta("resource", "wood")
 	root.set_meta("amount", 3)
+	# 必须在所有随机采样之后换外观，保证相同种子的植被位置与资源数量不漂移。
+	Assets.replace_group(root, "tree", Vector3(h * 0.50, h * 1.15, h * 0.50), Vector3(0, h * 0.575, 0))
 	return root
 
 
@@ -100,6 +105,7 @@ static func make_acacia(rng: RandomNumberGenerator, scale := 1.0) -> Node3D:
 	root.set_meta("collide_radius", 0.7 * scale)
 	root.set_meta("resource", "wood")
 	root.set_meta("amount", 2)
+	Assets.replace_group(root, "tree_alt", Vector3(h * 1.30, h * 1.22, h * 1.30), Vector3(0, h * 0.61, 0))
 	return root
 
 
@@ -152,6 +158,7 @@ static func make_bush(rng: RandomNumberGenerator, scale := 1.0) -> Node3D:
 	root.set_meta("collide_radius", 0.0)
 	root.set_meta("resource", "fiber")
 	root.set_meta("amount", 2)
+	Assets.replace_group(root, "bush_alt" if rng.state % 2 == 0 else "bush", Vector3(1.6, 0.9, 1.5) * scale, Vector3(0, 0.45 * scale, 0))
 	return root
 
 
@@ -183,10 +190,24 @@ static func grass_mesh(rng: RandomNumberGenerator) -> ArrayMesh:
 		st.add_vertex(base + Vector3(px, 0, pz))
 		st.add_vertex(tip)
 	st.generate_normals()
+	var asset := Assets.fitted("grass", Vector3(0.6, 0.7, 0.6), Vector3(0, 0.35, 0))
+	if asset != null:
+		var imported: MeshInstance3D = asset.get_node("Mesh")
+		var fitted_mesh := SurfaceTool.new()
+		fitted_mesh.append_from(imported.mesh, 0, asset.transform)
+		var mesh := fitted_mesh.commit()
+		mesh.surface_set_material(0, imported.mesh.surface_get_material(0))
+		asset.free()
+		return mesh
 	return st.commit()
 
 
-static func grass_material() -> StandardMaterial3D:
+static func grass_material() -> Material:
+	var asset := Assets.instantiate("grass")
+	if asset != null:
+		var material: Material = asset.get_node("Mesh").mesh.surface_get_material(0).duplicate()
+		asset.free()
+		return material
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
 	m.roughness = 1.0
@@ -239,6 +260,9 @@ static func make_rock(rng: RandomNumberGenerator, scale := 1.0, ore := false) ->
 		root.set_meta("amount", 2)
 
 	root.set_meta("collide_radius", 1.1 * scale)
+	for child in root.get_children():
+		if child is MeshInstance3D and child.mesh is SphereMesh:
+			Assets.cover_mesh(child, "rock_alt" if ore else "rock")
 	return root
 
 
@@ -252,4 +276,5 @@ static func make_stump() -> Node3D:
 	c.radial_segments = 7
 	root.add_child(_mi(c, M.surface("wood", Color(0.42, 0.32, 0.24)), Vector3(0, 0.27, 0)))
 	root.set_meta("collide_radius", 0.0)
+	Assets.replace_group(root, "stump", Vector3(1.24, 0.55, 1.0), Vector3(0, 0.275, 0))
 	return root

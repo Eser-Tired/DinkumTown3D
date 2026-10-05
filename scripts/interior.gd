@@ -23,6 +23,7 @@ const SECTOR_ORIGIN := Vector2(900.0, 900.0)
 const SECTOR_STRIDE := 600.0
 ## 室内地面高度（见文件头说明）
 const FLOOR_Y := 40.0
+const Assets := preload("res://scripts/optional_assets.gd")
 
 ## 进门判定半径：玩家到门中心的距离小于它就认为"站在门口"。
 ## 【下限是被杂货铺卡出来的】门在中心外 3.3 米，而玩家被避让圆顶在 6.02 米外
@@ -307,7 +308,10 @@ static func _mi(mesh: Mesh, m: Material, pos := Vector3.ZERO, rot := Vector3.ZER
 static func _box(size: Vector3, m: Material, pos := Vector3.ZERO) -> MeshInstance3D:
 	var b := BoxMesh.new()
 	b.size = size
-	return _mi(b, m, pos)
+	var mi := _mi(b, m, pos)
+	if m.get_meta("surface_kind", "") == "wood":
+		Assets.cover_mesh(mi, "beam")
+	return mi
 
 
 static func _cyl(r: float, h: float, m: Material, pos := Vector3.ZERO, seg := 10) -> MeshInstance3D:
@@ -402,9 +406,12 @@ static func _lamp(pos: Vector3, energy := 1.6, range_m := 8.0) -> OmniLight3D:
 static func _build_hut(root: Node3D, w: float, d: float, h: float, hole: Dictionary,
 		rng: RandomNumberGenerator, center: Vector2, cols: Array) -> Vector3:
 	var floor_m := _mat(Color(0.52, 0.36, 0.24))
+	floor_m.set_meta("surface_kind", "wood")
 	var wall_m := _mat(Color(0.88, 0.84, 0.74))
 	var wood := _mat(Color(0.46, 0.31, 0.20))
+	wood.set_meta("surface_kind", "wood")
 	var wood_l := _mat(Color(0.68, 0.50, 0.33))
+	wood_l.set_meta("surface_kind", "wood")
 	var iron := _mat(Color(0.36, 0.36, 0.38), 0.7)
 
 	root.add_child(_box(Vector3(w, 0.24, d), floor_m, Vector3(0, -0.12, 0)))
@@ -443,16 +450,21 @@ static func _build_hut(root: Node3D, w: float, d: float, h: float, hole: Diction
 	bed.add_child(_box(Vector3(1.15, 0.22, 2.1), _mat(Color(0.80, 0.78, 0.70)), Vector3(0, 0.58, 0)))
 	bed.add_child(_box(Vector3(0.9, 0.16, 0.42), _mat(Color(0.90, 0.88, 0.82)), Vector3(0, 0.74, -0.78)))
 	bed.add_child(_box(Vector3(1.2, 0.5, 0.12), wood, Vector3(0, 0.5, -1.12)))
+	Assets.replace_group(bed, "bed", Vector3(1.25, 0.90, 2.24), Vector3(0, 0.45, 0), true)
 	root.add_child(bed)
 	cols.append({"pos": center + Vector2(-w * 0.5 + 1.5, -d * 0.5 + 1.7), "r": 1.2})
 
 	# 木桌 + 两把椅子
 	var tx := w * 0.5 - 2.1
 	var tz := -d * 0.5 + 1.9
-	root.add_child(_box(Vector3(1.7, 0.12, 0.95), wood_l, Vector3(tx, 0.76, tz)))
+	var table := Node3D.new()
+	table.position = Vector3(tx, 0, tz)
+	table.add_child(_box(Vector3(1.7, 0.12, 0.95), wood_l, Vector3(0, 0.76, 0)))
 	for sx in [-0.72, 0.72]:
 		for sz in [-0.36, 0.36]:
-			root.add_child(_box(Vector3(0.11, 0.76, 0.11), wood, Vector3(tx + sx, 0.38, tz + sz)))
+			table.add_child(_box(Vector3(0.11, 0.76, 0.11), wood, Vector3(sx, 0.38, sz)))
+	Assets.replace_group(table, "table", Vector3(1.7, 0.82, 0.95), Vector3(0, 0.41, 0), true)
+	root.add_child(table)
 	cols.append({"pos": center + Vector2(tx, tz), "r": 1.0})
 	for s in [-1.0, 1.0]:
 		var ch := Node3D.new()
@@ -462,6 +474,7 @@ static func _build_hut(root: Node3D, w: float, d: float, h: float, hole: Diction
 		for ax in [-0.2, 0.2]:
 			for az in [-0.2, 0.2]:
 				ch.add_child(_box(Vector3(0.08, 0.46, 0.08), wood, Vector3(ax, 0.23, az)))
+		Assets.replace_group(ch, "chair", Vector3(0.5, 0.55, 0.5), Vector3(0, 0.275, 0))
 		root.add_child(ch)
 
 	# 铁皮炉灶 + 烟囱：屋里的视觉中心，也是主光源
@@ -472,6 +485,7 @@ static func _build_hut(root: Node3D, w: float, d: float, h: float, hole: Diction
 	stove.add_child(_cyl(0.44, 1.15, iron, Vector3(0, 0.58, 0), 10))
 	stove.add_child(_box(Vector3(0.34, 0.30, 0.10), glow_mat(Color(1.0, 0.55, 0.18)), Vector3(0, 0.42, 0.45)))
 	stove.add_child(_cyl(0.15, h - 1.15, iron, Vector3(0, 1.15 + (h - 1.15) * 0.5, 0), 8))
+	Assets.replace_group(stove, "stove", Vector3(0.88, h, 0.9), Vector3(0, h * 0.5, 0))
 	root.add_child(stove)
 	root.add_child(_lamp(Vector3(sx, 1.1, sz), 2.2, 7.5))
 	cols.append({"pos": center + Vector2(sx, sz), "r": 0.62})
@@ -480,8 +494,13 @@ static func _build_hut(root: Node3D, w: float, d: float, h: float, hole: Diction
 	for i in 2:
 		var bx := -w * 0.5 + 1.2 + float(i) * 1.0
 		var bz := d * 0.5 - 1.3
-		root.add_child(_box(Vector3(0.82, 0.72, 0.82), wood_l, Vector3(bx, 0.36, bz)))
-		root.add_child(_box(Vector3(0.86, 0.08, 0.86), wood, Vector3(bx, 0.76, bz)))
+		var box := _box(Vector3(0.82, 0.72, 0.82), wood_l, Vector3(bx, 0.36, bz))
+		Assets.cover_mesh(box, "crate")
+		root.add_child(box)
+		var lid := _box(Vector3(0.86, 0.08, 0.86), wood, Vector3(bx, 0.76, bz))
+		if box.has_node("AssetVisual"):
+			lid.layers = 0
+		root.add_child(lid)
 		if i == 0:
 			cols.append({"pos": center + Vector2(bx, bz), "r": 0.6})
 
@@ -508,9 +527,12 @@ static func _build_hut(root: Node3D, w: float, d: float, h: float, hole: Diction
 static func _build_shop(root: Node3D, w: float, d: float, h: float, hole: Dictionary,
 		rng: RandomNumberGenerator, center: Vector2, cols: Array) -> void:
 	var floor_m := _mat(Color(0.58, 0.44, 0.30))
+	floor_m.set_meta("surface_kind", "wood")
 	var wall_m := _mat(Color(0.90, 0.86, 0.76))
 	var wood := _mat(Color(0.44, 0.30, 0.19))
+	wood.set_meta("surface_kind", "wood")
 	var wood_l := _mat(Color(0.70, 0.53, 0.35))
+	wood_l.set_meta("surface_kind", "wood")
 
 	root.add_child(_box(Vector3(w, 0.24, d), floor_m, Vector3(0, -0.12, 0)))
 	root.add_child(_box(Vector3(w, 0.24, d), _mat(Color(0.76, 0.72, 0.64)), Vector3(0, h + 0.12, 0)))
@@ -576,6 +598,13 @@ static func _build_shop(root: Node3D, w: float, d: float, h: float, hole: Dictio
 				sh.add_child(_box(Vector3(0.42, 0.42, 0.42), _mat(gc),
 					Vector3(0, 0.88 + float(i) * 0.85, -1.6 + float(j) * 1.05)))
 		sh.add_child(_box(Vector3(0.12, 3.2, 4.2), wood, Vector3(-s * 0.42, 1.6, 0)))
+		Assets.replace_group(sh, "shelf", Vector3(0.85, 3.2, 4.2), Vector3(0, 1.6, 0), true)
+		# 货品仍消耗原随机数，换种子和进屋顺序不会改变世界；新货瓶是纯视觉节点。
+		for level in 3:
+			for item in 4:
+				var goods := Assets.fitted("bottle" if item % 2 else "cup", Vector3(0.24, 0.32, 0.24), Vector3(0, 0.78 + level * 0.85, -1.6 + item * 1.05))
+				if goods != null:
+					sh.add_child(goods)
 		root.add_child(sh)
 		cols.append({"pos": center + Vector2(sx, -0.6), "r": 0.95})
 
@@ -583,12 +612,18 @@ static func _build_shop(root: Node3D, w: float, d: float, h: float, hole: Dictio
 	for i in 3:
 		var bx := w * 0.5 - 1.3
 		var bz := d * 0.5 - 1.6 - float(i) * 1.15
-		root.add_child(_cyl(0.42, 0.9, wood, Vector3(bx, 0.45, bz), 10))
-		root.add_child(_cyl(0.44, 0.10, _mat(Color(0.34, 0.34, 0.36), 0.6), Vector3(bx, 0.92, bz), 10))
+		var barrel := _cyl(0.42, 0.9, wood, Vector3(bx, 0.45, bz), 10)
+		Assets.cover_mesh(barrel, "barrel")
+		root.add_child(barrel)
+		var rim := _cyl(0.44, 0.10, _mat(Color(0.34, 0.34, 0.36), 0.6), Vector3(bx, 0.92, bz), 10)
+		if barrel.has_node("AssetVisual"):
+			rim.layers = 0
+		root.add_child(rim)
 	for i in 2:
 		var pz := d * 0.5 - 1.4 - float(i) * 1.0
-		root.add_child(_box(Vector3(0.9, 0.8, 0.7), _mat(Color(0.76, 0.68, 0.48)),
-			Vector3(-w * 0.5 + 1.1, 0.4, pz)))
+		var bag := _box(Vector3(0.9, 0.8, 0.7), _mat(Color(0.76, 0.68, 0.48)), Vector3(-w * 0.5 + 1.1, 0.4, pz))
+		Assets.cover_mesh(bag, "bag")
+		root.add_child(bag)
 
 	# —— 灯：铺子要比屋子亮 ——
 	root.add_child(_lamp(Vector3(0.0, h - 0.6, 0.0), 2.0, 12.0))
@@ -601,6 +636,7 @@ static func _build_shop(root: Node3D, w: float, d: float, h: float, hole: Dictio
 static func _build_tent(root: Node3D, r: float, h: float, rng: RandomNumberGenerator) -> Vector3:
 	var canvas := _mat(Color(0.86, 0.80, 0.65))
 	var wood := _mat(Color(0.46, 0.31, 0.20))
+	wood.set_meta("surface_kind", "wood")
 
 	root.add_child(_cyl(r, 0.2, _mat(Color(0.60, 0.52, 0.38)), Vector3(0, -0.1, 0), 12))
 
@@ -627,7 +663,9 @@ static func _build_tent(root: Node3D, r: float, h: float, rng: RandomNumberGener
 	# 睡袋 + 木箱 + 小灯
 	root.add_child(_box(Vector3(1.1, 0.24, 2.2), _mat(Color(0.42, 0.50, 0.40)), Vector3(-r * 0.45, 0.12, -0.6)))
 	root.add_child(_box(Vector3(0.8, 0.16, 0.45), _mat(Color(0.88, 0.86, 0.78)), Vector3(-r * 0.45, 0.30, -1.5)))
-	root.add_child(_box(Vector3(0.78, 0.62, 0.78), wood, Vector3(r * 0.5, 0.31, -0.9)))
+	var crate := _box(Vector3(0.78, 0.62, 0.78), wood, Vector3(r * 0.5, 0.31, -0.9))
+	Assets.cover_mesh(crate, "crate")
+	root.add_child(crate)
 	root.add_child(_cyl(0.13, 0.34, _mat(Color(0.34, 0.34, 0.36), 0.6), Vector3(r * 0.5, 0.72, -0.9), 8))
 	root.add_child(_box(Vector3(0.18, 0.20, 0.18), glow_mat(Color(1.0, 0.84, 0.52)), Vector3(r * 0.5, 0.94, -0.9)))
 	root.add_child(_lamp(Vector3(r * 0.5, 1.05, -0.9), 1.6, 6.0))
