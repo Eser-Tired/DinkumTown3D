@@ -44,13 +44,11 @@ const BASE_SEP := 14.0
 var _vol_master := 1.0
 var _quality := 1
 var _fullscreen := false
-var _joy_offset := Vector2(-1.0, -1.0)   ## -1 = 未自定义，用默认贴边位置
 
 var _center: CenterContainer
 var _box: VBoxContainer
 var _title: Label
 var _note: Label
-var _reset_btn: Button
 var _back_btn: Button
 var _row_labels: Array = []
 var _vol_slider: HSlider
@@ -133,19 +131,11 @@ func _build() -> void:
 	box.add_child(row3)
 
 	_note = Label.new()
-	_note.text = "提示：手机版进入游戏后可长按左下角摇杆拖动位置，\n松手即保存为该设备的习惯位置。"
+	_note.text = "提示：手机版进入游戏后，左半屏任意处按下都会在该处生成摇杆，\n松手即消失；无需另外调整摇杆位置。"
 	_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_note.add_theme_font_size_override("font_size", BASE_TIP_FONT)
 	_note.add_theme_color_override("font_color", C_TEXT_DIM)
 	box.add_child(_note)
-
-	var row4 := HBoxContainer.new()
-	row4.alignment = BoxContainer.ALIGNMENT_CENTER
-	row4.add_theme_constant_override("separation", 12)
-	_reset_btn = _button("重置摇杆位置", func(): _reset_joystick())
-	_reset_btn.custom_minimum_size = BASE_BTN_SMALL
-	row4.add_child(_reset_btn)
-	box.add_child(row4)
 
 	_back_btn = _button("返回", func(): back_requested.emit())
 	_back_btn.custom_minimum_size = BASE_BTN_SMALL
@@ -230,16 +220,6 @@ func _on_fullscreen(on: bool) -> void:
 	save_settings()
 
 
-## 重置摇杆只写配置是不够的：已经挂着的 TouchControls 不会重读文件。
-## 所以额外发一个动作，让 main 转交给触控层立刻恢复默认位置。
-func _reset_joystick() -> void:
-	_joy_offset = Vector2(-1.0, -1.0)
-	save_settings()
-	if GameBus != null:
-		GameBus.touch_action.emit("reset_joy")
-		GameBus.toast.emit("摇杆位置已重置为默认")
-
-
 # ——————————————— 应用 ———————————————
 func _apply_vol() -> void:
 	var bus := AudioServer.get_bus_index("Master")
@@ -275,10 +255,6 @@ func load_settings() -> void:
 	_vol_master = float(cf.get_value("audio", "master", 1.0))
 	_quality = int(cf.get_value("video", "quality", 1))
 	_fullscreen = bool(cf.get_value("video", "fullscreen", false))
-	_joy_offset = Vector2(
-		float(cf.get_value("touch", "joy_x", -1.0)),
-		float(cf.get_value("touch", "joy_y", -1.0))
-	)
 	_apply_vol()
 	_sync_widgets()
 	_apply_quality()
@@ -303,8 +279,6 @@ func save_settings() -> void:
 	cf.set_value("audio", "master", _vol_master)
 	cf.set_value("video", "quality", _quality)
 	cf.set_value("video", "fullscreen", _fullscreen)
-	cf.set_value("touch", "joy_x", _joy_offset.x)
-	cf.set_value("touch", "joy_y", _joy_offset.y)
 	cf.save(SETTINGS_PATH)
 
 
@@ -340,9 +314,6 @@ func set_ui_scale(k: float) -> void:
 			var lb: Label = l
 			lb.custom_minimum_size = Vector2(BASE_ROW_LABEL_W * k, 0.0)
 			lb.add_theme_font_size_override("font_size", U.text_size(BASE_ROW_FONT, k, 12))
-	if _reset_btn != null:
-		_reset_btn.custom_minimum_size = BASE_BTN_SMALL * k
-		_reset_btn.add_theme_font_size_override("font_size", U.text_size(BASE_BTN_FONT, k, 13))
 	if _back_btn != null:
 		_back_btn.custom_minimum_size = BASE_BTN_SMALL * k
 		_back_btn.add_theme_font_size_override("font_size", U.text_size(BASE_BTN_FONT, k, 13))

@@ -84,17 +84,30 @@ func _ready() -> void:
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(dir + "touch4_build_moved.png")
 
-	# —— 5) 摇杆拖动定位：长按把摇杆挪到屏幕 40%/58% 处 ——
+	# —— 5) 浮动摇杆：在左半屏 40%/58% 处落指，摇杆应长在该处并推满 ——
 	m._set_build_mode(false)
 	m._refresh_preview()
 	if tc != null:
-		tc._move_joy_to(Vector2(vs.x * 0.40, vs.y * 0.58))
-		tc._joy.set_drag_hint(true)
+		var p := Vector2(vs.x * 0.40, vs.y * 0.58)
+		var down := InputEventScreenTouch.new()
+		down.index = 7
+		down.position = p
+		down.pressed = true
+		tc._input(down)
+		var dr := InputEventScreenDrag.new()
+		dr.index = 7
+		dr.position = p + Vector2(30.0, -40.0)
+		tc._input(dr)
+		print("JOY float center=%s move=%s" % [tc._joy_center(), GameBus.touch_move])
 	await get_tree().create_timer(0.6).timeout
 	await RenderingServer.frame_post_draw
-	get_viewport().get_texture().get_image().save_png(dir + "touch5_joy_moved.png")
+	get_viewport().get_texture().get_image().save_png(dir + "touch5_joy_floating.png")
 	if tc != null:
-		tc.reset_joy_position()
+		var up := InputEventScreenTouch.new()
+		up.index = 7
+		up.position = Vector2(vs.x * 0.40, vs.y * 0.58)
+		up.pressed = false
+		tc._input(up)
 
 	# —— 6) 背包界面：点「背包」按钮打开，layer=30 应盖住 HUD 与触控层 ——
 	m._do_action("bag")

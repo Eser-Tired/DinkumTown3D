@@ -73,7 +73,9 @@ func _ready() -> void:
 			if _overlap(bb.get_global_rect(), r):
 				print("FAIL HUD btn '%s' covers %s" % [bb.text, r])
 				bad += 1
-	# 3) 摇杆命中圆不得压住任何按钮（实际代码也是圆形判定）
+	# 3) 摇杆【静止位】圆盘不得压住任何按钮。
+	# 注意：现在摇杆的感应区是整个左半屏，这里检查的是松手后那个"提示圆盘"的
+	# 落点别压在按钮上——按下时圆盘会跟着手指跑，那是设计如此，不算事故。
 	var joy: Control = tc.get_child(0)
 	var jc: Vector2 = joy.position + joy.size * 0.5
 	var jr_radius: float = tc._joy_r * 1.2
@@ -117,21 +119,60 @@ func _ready() -> void:
 		if not tc._hotbar_btns[1].text.contains("长矛"):
 			print("FAIL HOTBAR sync slot2 text='%s'" % tc._hotbar_btns[1].text)
 			bad += 1
-	# 7) 摇杆拖动落位：模拟挪到屏幕 40% 处，检查比例是否被正确记录
-	var want := Vector2(vs.x * 0.4, vs.y * 0.55)
-	tc._move_joy_to(want)
-	tc._commit_joy_pos()
-	if absf(tc._joy_pos_ratio.x - 0.4) > 0.02 or absf(tc._joy_pos_ratio.y - 0.55) > 0.02:
-		print("FAIL JOY commit ratio=%s (expect ~0.40, 0.55)" % tc._joy_pos_ratio)
+	# 7) 浮动摇杆：左半屏落指 → 摇杆就长在该处，且拖动期间不许自己移位
+	var ta := Vector2(vs.x * 0.22, vs.y * 0.62)
+	_feed_touch(tc, 11, ta, true)
+	if tc._joy_id != 11:
+		print("FAIL JOY left-half touch not captured (joy_id=%d)" % tc._joy_id)
 		bad += 1
-	# 落位后重建布局，摇杆中心应贴近目标点
-	tc._rebuild()
-	var jc2: Vector2 = tc.get_child(0).position + tc.get_child(0).size * 0.5
-	if jc2.distance_to(want) > 2.0:
-		print("FAIL JOY rebuild center=%s (expect %s)" % [jc2, want])
+	if tc._joy_center().distance_to(ta) > 1.0:
+		print("FAIL JOY center=%s (expect at finger %s)" % [tc._joy_center(), ta])
 		bad += 1
-	# 复位，别把测试结果写进真实设置
-	tc.reset_joy_position()
+	# 落指瞬间不该有位移，否则"手指一放上去人就窜出去"
+	if GameBus.touch_move.length() > 0.001:
+		print("FAIL JOY on-press move=%s (expect zero)" % GameBus.touch_move)
+		bad += 1
+	var td := ta + Vector2(0.0, -60.0 * tc._k)
+	_feed_drag(tc, 11, td)
+	if tc._joy_center().distance_to(ta) > 1.0:
+		print("FAIL JOY center drifted to %s (must stay at %s)" % [tc._joy_center(), ta])
+		bad += 1
+	# 向上推 → touch_move.y 为负（向前）
+	if GameBus.touch_move.y > -0.3:
+		print("FAIL JOY move=%s (expect forward, y<0)" % GameBus.touch_move)
+		bad += 1
+	_feed_touch(tc, 11, td, false)
+	if tc._joy_id != -1 or GameBus.touch_move != Vector2.ZERO:
+		print("FAIL JOY release not cleared id=%d move=%s" % [tc._joy_id, GameBus.touch_move])
+		bad += 1
+	if tc._joy_center().distance_to(tc._joy_rest_center()) > 1.0:
+		print("FAIL JOY not back to rest %s (expect %s)" % [tc._joy_center(), tc._joy_rest_center()])
+		bad += 1
+
+	# 8) 右半屏落指必须留给视角/点击，不能被摇杆抢走。
+	# 取 62%/35%：再往右会撞到「潜 / 跳 / 系统钮」，撞了就测不到"空白区"这条路径。
+	var tb := Vector2(vs.x * 0.62, vs.y * 0.35)
+	_feed_touch(tc, 12, tb, true)
+	if tc._joy_id != -1:
+		print("FAIL JOY stole right-half touch (joy_id=%d)" % tc._joy_id)
+		bad += 1
+	if not tc._active.has(12):
+		print("FAIL right-half touch not registered for look")
+		bad += 1
+	_feed_touch(tc, 12, tb, false)
+
+	# 9) 左半屏的按钮优先于摇杆（否则摇杆区会盖掉菜单/背包/建造）
+	var lbtn := _first_left_button(btns, vs)
+	if lbtn == null:
+		print("FAIL no left-half button to test")
+		bad += 1
+	else:
+		var lr: Rect2 = (lbtn as Button).get_global_rect()
+		_feed_touch(tc, 13, lr.get_center(), true)
+		if tc._joy_id != -1:
+			print("FAIL JOY stole button '%s'" % (lbtn as Button).text)
+			bad += 1
+		_feed_touch(tc, 13, lr.get_center(), false)
 
 	print("buttons=%d joy_center=(%.0f, %.0f) joy_r=%.0f k=%.2f" % [btns.size(), jc.x, jc.y, jr_radius, tc._k])
 	print("==== CHECK %s bad=%d ====" % ["PASS" if bad == 0 else "FAIL", bad])
@@ -168,6 +209,31 @@ func _parse_size() -> Vector2i:
 	if w < 320 or h < 240:
 		return Vector2i.ZERO
 	return Vector2i(w, h)
+
+
+## 直接喂一个屏幕触摸事件给触控层（绕过引擎的 GUI 派发，测的是它自己的判定逻辑）
+func _feed_touch(tc: CanvasLayer, idx: int, pos: Vector2, pressed: bool) -> void:
+	var e := InputEventScreenTouch.new()
+	e.index = idx
+	e.position = pos
+	e.pressed = pressed
+	tc._input(e)
+
+
+func _feed_drag(tc: CanvasLayer, idx: int, pos: Vector2) -> void:
+	var e := InputEventScreenDrag.new()
+	e.index = idx
+	e.position = pos
+	tc._input(e)
+
+
+## 找一个落在左半屏的按钮（摇杆区与按钮区重叠时用于验证优先级）
+func _first_left_button(btns: Array, vs: Vector2) -> Button:
+	for b in btns:
+		var bb: Button = b
+		if bb.get_global_rect().get_center().x < vs.x * 0.5:
+			return bb
+	return null
 
 
 func _rect_circle(r: Rect2, c: Vector2, rad: float) -> bool:

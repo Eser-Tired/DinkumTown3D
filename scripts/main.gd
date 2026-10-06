@@ -1164,12 +1164,6 @@ func _do_action(a: String) -> void:
 			_toggle_pause()
 		"pause":
 			_toggle_pause()
-		"reset_joy":
-			# 设置面板里"重置摇杆"发来的：光写配置文件不够，挂载中的
-			# TouchControls 不会重读，必须让它自己重排一次。
-			var tc := get_node_or_null("TouchControls")
-			if tc != null and tc.has_method("reset_joy_position"):
-				tc.reset_joy_position()
 		"menu":
 			return_to_menu()
 		"jump":

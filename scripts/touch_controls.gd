@@ -1,14 +1,26 @@
 extends CanvasLayer
 class_name TouchControls
 const U := preload("res://scripts/ui_layout.gd")
-## 移动端触控层 —— 左摇杆（位置可拖）/ 底部物品栏 / 右侧动作键 / 点击交互
+## 移动端触控层 —— 左摇杆（浮动）/ 底部物品栏 / 右侧动作键 / 点击交互
 ##
 ## 【布局分区】
-##   左下  虚拟摇杆 —— 移动，推满自动奔跑。**长按 0.35 秒可拖动重新定位**，
-##         位置按屏幕比例持久化到 user://settings.cfg
-##   底部  4 格快捷物品栏 + 背包按钮 + 建造按钮
-##   右侧  跳跃键 + 使用键（攻击/工具，随当前手持物变化）+ 农事键
-##   空白  单指拖拽转视角、双指捏合缩放、轻点（位移小于阈值的点按）触发交互
+##   左半屏  虚拟摇杆 —— **手指落在左半屏任意处，摇杆就在该处生成**，推满自动奔跑。
+##           中心一经确定就不再自己移动，直到手指离开屏幕；松手后回到左下静止位。
+##   底部    4 格快捷物品栏 + 背包按钮 + 建造按钮
+##   右侧    跳跃键 + 使用键（攻击/工具，随当前手持物变化）+ 农事键
+##   右半屏  单指拖拽转视角、双指捏合缩放、轻点（位移小于阈值的点按）触发交互
+##
+## 【为什么改成"按哪出哪"的浮动摇杆】固定圆心要求拇指每次都精确落在同一个圆里，
+## 手机上做不到——横屏两手握持时拇指的自然落点在屏幕中间偏下，离左下角很远，
+## 于是经常"推了个空"。浮动之后玩家不用找摇杆，把拇指放上去就行。
+##
+## 【为什么松手就回静止位，而不是留在原地】留在原地会有两个坏处：
+## 一是下次落指时摇杆要"跳"一次过去，视觉上像被抢走；二是静止位会漂到按钮区
+## 上方（比如紧贴着「建造」键松手），淡淡的一个圆盘压在按钮上很脏。
+## 回到固定静止位则永远只有一个"这里可以按下"的提示位置。
+##
+## 【为什么左半屏按下不再发 touch_tap】左半屏整块就是移动区，落指即推摇杆；
+## 轻点交互交给右半屏——本来也是右手大拇指的主战场。
 ##
 ## 【为什么把「采集」并入点击】用户要求"人物靠近直接触屏点击采集"。
 ## 独立按钮会占掉右下最宝贵的大拇指热区，而且采集/攻击在操作语义上是同一件事
@@ -24,12 +36,12 @@ const U := preload("res://scripts/ui_layout.gd")
 ## 桌面验证：启动加 --touch-ui，会强制挂载并开启鼠标模拟触摸。
 
 const REF := Vector2(1440.0, 810.0)   # 布局参考分辨率
-const SETTINGS_PATH := "user://settings.cfg"
+
+## 摇杆感应区：只有落在这个横向比例【以左】的按下才算摇杆（0.5 = 左半屏）
+const JOY_ZONE := 0.5
 
 ## 轻点判定阈值（像素，按 k 缩放）：按下到抬起的位移小于它算点击
 const TAP_SLOP := 18.0
-## 长按进入「拖动摇杆」所需的时长
-const LONG_PRESS := 0.35
 
 var _joy: JoyPad
 var _joy_r := 92.0
@@ -37,11 +49,9 @@ var _joy_id := -1
 var _active := {}              ## index -> Vector2，参与「视角 / 捏合」的手指
 var _pinch_prev := 0.0
 
-## 摇杆自定义位置（屏幕比例 0..1，左上为原点；-1 表示用默认贴边位置）
-var _joy_pos_ratio := Vector2(-1.0, -1.0)
-var _dragging_joy := false
-var _joy_press_t := 0.0
-var _joy_press_at := Vector2.ZERO
+## 当前这一「摇」的原点 = 落指位置。偏移量始终相对它计算，
+## 与摇杆视觉中心解耦——这样即使中心被屏幕边缘裁掉，也不会凭空产生一个方向。
+var _joy_origin := Vector2.ZERO
 
 ## 轻点检测：记录按下位置
 var _tap_id := -1
@@ -70,7 +80,6 @@ func _ready() -> void:
 	layer = 20
 	name = "TouchControls"
 	GameBus.touch_enabled = true
-	_load_settings()
 
 	_joy = JoyPad.new()
 	_joy.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -87,32 +96,6 @@ func _exit_tree() -> void:
 	GameBus.touch_look = Vector2.ZERO
 	GameBus.touch_zoom = 0.0
 	GameBus.touch_run = false
-
-
-# ——————————————— 设置持久化 ———————————————
-func _load_settings() -> void:
-	var cf := ConfigFile.new()
-	if cf.load(SETTINGS_PATH) != OK:
-		return
-	_joy_pos_ratio = Vector2(
-		float(cf.get_value("touch", "joy_x", -1.0)),
-		float(cf.get_value("touch", "joy_y", -1.0))
-	)
-
-
-func _save_joy_pos() -> void:
-	var cf := ConfigFile.new()
-	cf.load(SETTINGS_PATH)              # 保留主界面写入的音量/画质等
-	cf.set_value("touch", "joy_x", _joy_pos_ratio.x)
-	cf.set_value("touch", "joy_y", _joy_pos_ratio.y)
-	cf.save(SETTINGS_PATH)
-
-
-## 供设置界面调用：恢复默认贴边位置
-func reset_joy_position() -> void:
-	_joy_pos_ratio = Vector2(-1.0, -1.0)
-	_save_joy_pos()
-	_rebuild()
 
 
 ## 由 main 告知 HUD 实际使用的"文字缩放"（可能大于 k），系统小钮据此让位。
@@ -159,17 +142,13 @@ func _rebuild() -> void:
 		if c != _joy:
 			c.queue_free()
 
-	# —— 虚拟摇杆：默认锚左下；有自定义比例则按比例定位 ——
+	# —— 虚拟摇杆：静止位固定左下 ——
+	# 【静止位只剩"提示可以按下"这一个作用】摇杆改成浮动定位后不再需要自定义位置：
+	# 真正的落点由手指决定，这里恒定贴左下，松手也回到这里。
 	_joy_r = 92.0 * k
 	_joy.size = Vector2(_joy_r * 2.6, _joy_r * 2.6)
-	if _joy_pos_ratio.x >= 0.0 and _joy_pos_ratio.y >= 0.0:
-		# 自定义位置存的是「摇杆中心」的屏幕比例，转成左上角坐标
-		var ctr := Vector2(_joy_pos_ratio.x * W, _joy_pos_ratio.y * H)
-		_joy.position = ctr - _joy.size * 0.5
-	else:
-		_joy.position = Vector2(46.0 * k, H - _joy_r * 2.6 - 40.0 * k)
+	_move_joy_to(_joy_rest_center())
 	_joy.set_center_radius(_joy_r)
-	_joy.queue_redraw()
 
 	# —— 左侧竖排小钮：菜单 / 背包 / 建造 ——
 	# 必须整块避开摇杆命中圆（_joy_r*1.2），否则测试和手感上都会被摇杆吃掉。
@@ -363,6 +342,11 @@ func _joy_center() -> Vector2:
 	return _joy.position + _joy.size * 0.5
 
 
+## 摇杆的静止位（左下贴边）。手指按下时中心临时挪到落指处，松手回到这里。
+func _joy_rest_center() -> Vector2:
+	return Vector2(46.0 * _k + _joy_r * 1.3, _vs.y - _joy_r * 1.3 - 40.0 * _k)
+
+
 func _in_button(p: Vector2) -> bool:
 	for r in _btn_rects:
 		var rr: Rect2 = r
@@ -388,13 +372,12 @@ func _input(event: InputEvent) -> void:
 ## 否则会出现"按下时没被屏蔽、抬起时被屏蔽"导致摇杆卡住推到底的残留。
 func release_all() -> void:
 	_joy_id = -1
-	_dragging_joy = false
-	_joy_press_t = 0.0
 	_tap_id = -1
 	_active.clear()
 	_pinch_prev = 0.0
 	_joy.set_knob(Vector2.ZERO)
-	_joy.set_drag_hint(false)
+	_joy.set_active(false)
+	_move_joy_to(_joy_rest_center())
 	GameBus.touch_move = Vector2.ZERO
 	GameBus.touch_look = Vector2.ZERO
 	GameBus.touch_zoom = 0.0
@@ -410,14 +393,15 @@ func _on_touch(idx: int, pos: Vector2, pressed: bool) -> void:
 	if pressed:
 		if _in_button(pos):
 			return
-		# 摇杆命中圆（略大于视觉半径，手感友好）；按钮已在前面判定过，优先级更高
-		if pos.distance_to(_joy_center()) < _joy_r * 1.2:
+		# 摇杆只认左半屏；按钮已在前面判定过，优先级更高。
+		# 【为什么不用命中圆】浮动摇杆没有"固定的圆"可命——整个左半屏都是感应区，
+		# 落指处就是圆心，所以只判 x 是否在感应区内。
+		if pos.x <= _vs.x * JOY_ZONE:
 			_joy_id = idx
-			_joy_press_t = 0.0
-			_joy_press_at = pos
-			_dragging_joy = false
-			# 按住不动算"长按"→ 进入拖动定位；一动就算推摇杆，看 _on_drag
-			_update_joy(pos)
+			_joy_origin = pos
+			_move_joy_to(pos, false)
+			_joy.set_active(true)
+			_update_joy(pos)        # 落指瞬间偏移为 0：不会凭空走一步
 			return
 		# 其余按下：先记下落点，抬起时再判定是「轻点」还是「拖视角」
 		_active[idx] = pos
@@ -431,15 +415,11 @@ func _on_touch(idx: int, pos: Vector2, pressed: bool) -> void:
 	# —— 抬起 ——
 	if idx == _joy_id:
 		_joy_id = -1
-		_joy_press_t = 0.0
-		_joy.set_knob(Vector2.ZERO)
+		_joy.set_active(false)
+		_update_joy(_joy_origin)         # 归零：旋钮回中、移动向量清零
 		GameBus.touch_move = Vector2.ZERO
 		GameBus.touch_run = false
-		# 松手落位：拖动定位模式下把新位置持久化，否则退出拖动模式还原到原中心
-		if _dragging_joy:
-			_commit_joy_pos()
-		_dragging_joy = false
-		_joy.set_drag_hint(false)
+		_move_joy_to(_joy_rest_center()) # 回到左下静止位等下一次落指
 		return
 
 	if _active.has(idx):
@@ -456,14 +436,9 @@ func _on_touch(idx: int, pos: Vector2, pressed: bool) -> void:
 
 func _on_drag(idx: int, pos: Vector2, rel: Vector2) -> void:
 	if idx == _joy_id:
-		_joy_press_t += 0.0     # 时间在 _process 里累加
-		# 长按后进入拖动定位：摇杆中心跟随手指
-		if _dragging_joy:
-			_move_joy_to(pos)
-			return
-		# 未进入长按前：正常推摇杆
-		if _joy_press_at.distance_to(pos) > 24.0 * _k:
-			_update_joy(pos)
+		# 中心在落指时就定死了，这里只按"手指相对落指处的位移"算偏移，
+		# 不再有死区——死区是为"长按拖动重定位"留的，那个手势已经取消。
+		_update_joy(pos)
 		return
 
 	if not _active.has(idx):
@@ -487,35 +462,20 @@ func _on_drag(idx: int, pos: Vector2, rel: Vector2) -> void:
 	GameBus.touch_look += rel
 
 
-func _process(dt: float) -> void:
-	# 摇杆长按计时：按住不动超过 LONG_PRESS 就切换到「拖动定位」模式
-	if _joy_id >= 0 and not _dragging_joy:
-		_joy_press_t += dt
-		if _joy_press_t >= LONG_PRESS:
-			_dragging_joy = true
-			_joy.set_drag_hint(true)
-	if _joy_id < 0 and _joy.is_drag_hint():
-		_joy.set_drag_hint(false)
-
-
-## 拖动定位：把摇杆中心挪到手指位置，并夹在屏幕内侧（避免半个摇杆跑出屏外）
-func _move_joy_to(pos: Vector2) -> void:
-	var margin := _joy_r * 1.1
-	var c := Vector2(
-		clampf(pos.x, margin, _vs.x - margin),
-		clampf(pos.y, margin, _vs.y - margin)
-	)
+## 把摇杆中心挪到指定点。
+## clamp_on：静止位要整个留在屏幕内，所以夹一下；**浮动落点不夹**——夹了会让
+## 视觉中心偏离手指，而偏移又是相对手指算的，贴着屏幕左边缘按下就会凭空往左推。
+## 边缘处摇杆被屏幕裁掉一角是可以接受的（主流手游的浮动摇杆都这样）。
+func _move_joy_to(pos: Vector2, clamp_on := true) -> void:
+	var c := pos
+	if clamp_on:
+		var margin := _joy_r * 1.1
+		c = Vector2(
+			clampf(c.x, margin, _vs.x - margin),
+			clampf(c.y, margin, _vs.y - margin)
+		)
 	_joy.position = c - _joy.size * 0.5
 	_joy.queue_redraw()
-
-
-## 松手落位：把当前中心换算成屏幕比例并持久化
-func _commit_joy_pos() -> void:
-	if _vs.x < 8.0 or _vs.y < 8.0:
-		return
-	var c := _joy_center()
-	_joy_pos_ratio = Vector2(c.x / _vs.x, c.y / _vs.y)
-	_save_joy_pos()
 
 
 ## 参与捏合的两指间距；不足两指时返回 0
@@ -529,7 +489,9 @@ func _pair_distance() -> float:
 
 
 func _update_joy(pos: Vector2) -> void:
-	var d := pos - _joy_center()
+	# 相对【落指处】而不是视觉中心：这两个点在屏幕边缘会分开，
+	# 用中心算会把"摇杆没画全"这件事误报成一个推动方向。
+	var d := pos - _joy_origin
 	if d.length() > _joy_r:
 		d = d.normalized() * _joy_r
 	_joy.set_knob(d)
@@ -542,7 +504,7 @@ func _update_joy(pos: Vector2) -> void:
 class JoyPad extends Control:
 	var _knob := Vector2.ZERO
 	var _r := 92.0
-	var _drag_hint := false
+	var _on := false          ## 有手指按着（摇杆"活"着）
 
 	func set_center_radius(r: float) -> void:
 		_r = r
@@ -552,19 +514,19 @@ class JoyPad extends Control:
 		_knob = k
 		queue_redraw()
 
-	func set_drag_hint(on: bool) -> void:
-		_drag_hint = on
+	func set_active(on: bool) -> void:
+		_on = on
 		queue_redraw()
 
-	func is_drag_hint() -> bool:
-		return _drag_hint
+	func is_active() -> bool:
+		return _on
 
 	func _draw() -> void:
 		var c := size * 0.5
-		# 进入拖动定位模式时整体变亮 + 加一圈虚线感，提示"可以挪了"
+		# 静止时画得很淡（只是"这里能按下"的提示），按住时整体提亮。
 		var base_a := 0.13
 		var ring_a := 0.26
-		if _drag_hint:
+		if _on:
 			base_a = 0.24
 			ring_a = 0.62
 		draw_circle(c, _r, Color(0.85, 0.92, 1.0, base_a))
