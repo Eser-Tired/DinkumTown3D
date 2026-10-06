@@ -6,8 +6,8 @@
 
 | 附件 | 平台 | 大小 |
 |---|---|---|
-| `DinkumTown3D-Windows-x64.exe` | Windows 10/11 x64 | SIZE_EXE |
-| `DinkumTown3D-Android.apk` | arm64-v8a / x86_64 | SIZE_APK |
+| `DinkumTown3D-Windows-x64.exe` | Windows 10/11 x64 | 约 150.8 MiB |
+| `DinkumTown3D-Android.apk` | arm64-v8a / x86_64 | 约 96.6 MiB |
 | `SHA256SUMS.txt` | SHA-256 校验值 | 文本 |
 | `BUILD_INFO.json` | 源码提交、签名指纹及验收记录 | JSON |
 
