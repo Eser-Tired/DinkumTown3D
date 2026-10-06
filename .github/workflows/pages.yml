@@ -35,12 +35,14 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      # 版本都取当前 latest。用 v4/v5/v3/v4 那套旧版本会触发
+      # "Node.js 20 is deprecated" 警告（GitHub 已在强制跑 Node 24）。
+      - uses: actions/checkout@v7
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
         with:
           # 关键：只传 site/ 子目录。写成 . 会把整个仓库（含 docs/ 的
           # 200 多个文件和大量截图）全传上去。
           path: site
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
