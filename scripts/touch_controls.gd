@@ -58,7 +58,13 @@ var _tap_id := -1
 var _tap_from := Vector2.ZERO
 
 var _btn_rects: Array = []
+var _btn_nodes: Array = []      ## 与 _btn_rects 一一对应的按钮引用，隐藏的键要能排除掉
 var _hold_btns: Array = []      ## 按住型按钮，release_all 时要复位
+## 只在特定模式出现的键：平时隐藏，隐藏时也不能吃掉点击
+var _rotate_btn: Button
+var _dive_btn: Button
+var _last_build_mode := false   ## 上一帧的建造模式，用于 diff 出变化再动 UI
+var _last_swim := false
 var _k := 1.0
 var _vs := REF
 
@@ -136,6 +142,7 @@ func _rebuild() -> void:
 	var k := _k
 
 	_btn_rects.clear()
+	_btn_nodes.clear()
 	_hotbar_btns.clear()
 	_hold_btns.clear()
 	for c in get_children():
@@ -174,18 +181,18 @@ func _rebuild() -> void:
 		_make_hotbar_cell(i, hx + i * (cell + gap), hy, cell, cell)
 	_refresh_hotbar()
 
-	# —— 右上：系统小钮 ——
-	# 【为什么不用常量】HUD 右侧竖列的高度受字号和实测文字宽度双重影响，
+	# —— 右上：只剩一个「存」——
+	# 【为什么把 读 / 加速 / 静音 全撤掉】三个都是"玩的时候"根本不按的：
+	# 读 = 暂停菜单里的「读取存档」；静音 = 设置面板的音量滑块拖到 0；
+	# 加速时间挪进暂停菜单。屏幕上每多一个钮，拇指就多记一个位置。
+	# 存档不一样——手机版随时可能被电话/切后台打断，必须一键可达，所以单独留下。
+	# 【y 为什么不能用常量】HUD 右侧竖列的高度受字号和实测文字宽度双重影响，
 	# 在那边算死了这边重算必然对不上。改为读 hud 报来的真实底边，
 	# 拿不到时退回 248k（桌面/未挂 HUD 的测试场景）。
 	var sys_y1 := maxf(248.0 * k, _hud_col_bottom + 30.0)
-	var sys_y2 := sys_y1 + 58.0 * k
-	var SYS_ROW1 := sys_y1 / k
-	var SYS_ROW2 := sys_y2 / k
-	_make_sys_button("存", "save", W - 200.0 * k, SYS_ROW1 * k, 84.0 * k, 52.0 * k)
-	_make_sys_button("读", "load", W - 108.0 * k, SYS_ROW1 * k, 84.0 * k, 52.0 * k)
-	_make_sys_button("加速", "time", W - 200.0 * k, SYS_ROW2 * k, 84.0 * k, 52.0 * k)
-	_make_sys_button("静音", "mute", W - 108.0 * k, SYS_ROW2 * k, 84.0 * k, 52.0 * k)
+	_make_sys_button("存", "save", W - 108.0 * k, sys_y1, 84.0 * k, 52.0 * k)
+	# 建造模式专用：旋转。与「存」同一行，不额外占垂直空间。
+	_rotate_btn = _btn_at("旋转", "rotate", W - 216.0 * k, sys_y1, 100.0 * k, 52.0 * k, 19)
 
 	# —— 右侧动作区：跳 / 使用 / 农事 ——
 	# 「使用」是最大最靠拇指的主键；跳在它上方；农事在它左侧。
@@ -193,15 +200,26 @@ func _rebuild() -> void:
 	_btn_at("跳", "jump", W - 264.0 * k, H - 246.0 * k, 108.0 * k, 108.0 * k, 21)
 	_btn_at("农事", "farm", W - 300.0 * k, H - 112.0 * k, 104.0 * k, 104.0 * k, 19)
 	# 下潜键：按【住】才往下，所以不能用 pressed（那是抬手才触发的一次性信号）。
-	# 放在「跳」正上方——两个都是垂直方向的键，位置一致好形成肌肉记忆；
-	# 陆地上它不起作用，没必要藏起来。
-	_make_hold_button("潜", "dive", W - 264.0 * k, H - 372.0 * k, 108.0 * k, 74.0 * k, 20)
-	# 建造模式专用：旋转 / 放置。放在系统钮下方，与 HUD 竖列彻底分离。
-	var rot_y := sys_y2 + 82.0 * k
-	_btn_at("旋转", "rotate", W - 128.0 * k, rot_y, 118.0 * k, 58.0 * k, 19)
-	_btn_at("放置", "place", W - 128.0 * k, rot_y + 66.0 * k, 118.0 * k, 58.0 * k, 19)
+	# 放在「跳」正上方——两个都是垂直方向的键，位置一致好形成肌肉记忆。
+	# 【为什么默认隐藏】只有水里用得上，陆地上按它没有任何反馈，
+	# 常年占着「跳」上方的位置纯属干扰；入水后由 main 同步 player_swimming 显形。
+	_dive_btn = _make_hold_button("潜", "dive", W - 264.0 * k, H - 372.0 * k, 108.0 * k, 74.0 * k, 20)
+	# 【为什么没有「放置」】main._do_action("use") 在建造模式下本来就是
+	# _try_place_at_mouse()，和 "place" 是同一个动作——两个钮纯属重复。
+	# 建造态直接按「使用」放置，与采集/攻击同一颗主键，肌肉记忆也统一。
 
+	_sync_mode_buttons()
 	GameBus.touch_layout_changed.emit(W, H, k)
+
+
+## 按当前模式决定「旋转 / 潜」是否出现。
+## 【为什么只改 visible 而不是重建布局】游泳状态在岸边会来回抖，重建会把十几个
+## 按钮销毁再造一遍；而这两个钮的位置在建布局时已经定好了，切模式只是显隐。
+func _sync_mode_buttons() -> void:
+	if is_instance_valid(_rotate_btn):
+		_rotate_btn.visible = GameBus.build_mode
+	if is_instance_valid(_dive_btn):
+		_dive_btn.visible = GameBus.player_swimming
 
 
 ## 中心点 + 尺寸创建按钮（区别于 Godot 的左上角定位）
@@ -224,6 +242,7 @@ func _btn_at(text: String, action: String, cx: float, cy: float, w: float, h: fl
 	b.size = sz
 	b.position = Vector2(cx - sz.x * 0.5, cy - sz.y * 0.5)
 	_btn_rects.append(Rect2(b.position, sz))
+	_btn_nodes.append(b)
 	return b
 
 
@@ -260,6 +279,7 @@ func _make_hold_button(text: String, action: String, cx: float, cy: float,
 	b.size = sz
 	b.position = Vector2(cx - sz.x * 0.5, cy - sz.y * 0.5)
 	_btn_rects.append(Rect2(b.position, sz))
+	_btn_nodes.append(b)
 	_hold_btns.append(b)
 	return b
 
@@ -317,6 +337,7 @@ func _make_hotbar_cell(i: int, x: float, y: float, w: float, h: float) -> void:
 	add_child(b)
 	_hotbar_btns.append(b)
 	_btn_rects.append(Rect2(b.position, b.size))
+	_btn_nodes.append(b)
 
 
 func _refresh_hotbar() -> void:
@@ -348,8 +369,14 @@ func _joy_rest_center() -> Vector2:
 
 
 func _in_button(p: Vector2) -> bool:
-	for r in _btn_rects:
-		var rr: Rect2 = r
+	for i in _btn_rects.size():
+		# 【隐藏的键不能吃掉点击】旋转/潜 在非对应模式下是 visible=false，
+		# 但它们的矩形还在数组里。不跳过的话，陆地上点「潜」的位置会既触发不了
+		# 下潜、也转不了视角——等于那块屏幕死了。
+		var b: Button = _btn_nodes[i]
+		if not b.visible:
+			continue
+		var rr: Rect2 = _btn_rects[i]
 		if rr.has_point(p):
 			return true
 	return false
@@ -460,6 +487,16 @@ func _on_drag(idx: int, pos: Vector2, rel: Vector2) -> void:
 		return
 
 	GameBus.touch_look += rel
+
+
+func _process(_dt: float) -> void:
+	# 模式键（旋转 / 潜）的显隐用轮询 diff，而不是新增两条信号：
+	# 建造模式与游泳状态都已经由 main 同步进 GameBus了，加信号要同时改
+	# GameBus + main + 这里三处，而每帧比两个 bool 的成本可以忽略。
+	if GameBus.build_mode != _last_build_mode or GameBus.player_swimming != _last_swim:
+		_last_build_mode = GameBus.build_mode
+		_last_swim = GameBus.player_swimming
+		_sync_mode_buttons()
 
 
 ## 把摇杆中心挪到指定点。

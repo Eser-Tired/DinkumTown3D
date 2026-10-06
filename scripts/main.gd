@@ -212,6 +212,8 @@ func _ready() -> void:
 	pause_menu.closed.connect(_on_pause_closed)
 	pause_menu.quit_requested.connect(_on_pause_quit)
 	pause_menu.load_requested.connect(_on_pause_load)
+	pause_menu.save_requested.connect(_on_pause_save)
+	pause_menu.speed_requested.connect(_on_pause_speed)
 
 	GameBus.register_module("main", self)
 
@@ -1104,7 +1106,10 @@ func _do_action(a: String) -> void:
 			# 水里不建：预览会浮在水面上，落位判定也过不去，直接不进这个模式
 			if not _can_act():
 				return
-			build_mode = not build_mode
+			# 【必须走 _set_build_mode】它会顺手把状态镜像到 GameBus.build_mode，
+			# 触控层据此决定单指拖动是转视角还是挪建造预览，以及决定「旋转」键
+			# 是否显隐。这里直接 toggle 本地变量的话，触控层永远以为没进建造。
+			_set_build_mode(not build_mode)
 			if build_mode:
 				preview_dist = _find_good_preview_dist()
 				# 进建造模式时把物品栏切到当前建筑对应的那一格，避免"看到的是斧头，
@@ -1318,6 +1323,22 @@ func _on_pause_load(slot: int) -> void:
 	_rebuild_hotbar()
 	if hud != null:
 		hud.toast("已读取槽位 %d" % (slot + 1) if ok else "读取失败")
+
+
+## 菜单里的「保存游戏」：与屏幕上的「存」同一个槽位，只是入口不同
+func _on_pause_save() -> void:
+	if save_sys == null:
+		return
+	var ok: bool = save_sys.save(1)
+	if hud != null:
+		hud.toast("已保存到槽位 1" if ok else "保存失败")
+
+
+## 菜单里的「加速时间」：手机上原来是一个常驻小钮，低频，收进菜单
+func _on_pause_speed() -> void:
+	if dn == null:
+		return
+	dn.toggle_speed()
 
 
 ## 背包数据源：资源计数（只读快照）
@@ -1751,6 +1772,9 @@ func _process(dt: float) -> void:
 		f.node.scale = Vector3(k, k * 1.1, k)
 		f.node.rotation.y += dt * 1.4
 
+	# 游泳状态同步给 GameBus：触控层的「潜」键据此显隐（陆地上不该出现这个键）
+	GameBus.player_swimming = player != null and player.swimming
+
 	if not build_mode and player != null and player.swimming:
 		# 水里优先播报水域状态：这时采集/攻击/农事都不可用，显示那些只会误导
 		var tip := "下潜中" if player.diving else "游泳中"
@@ -1793,7 +1817,8 @@ func _process(dt: float) -> void:
 		# 用 _hint() 选出句子后再统一 % 一个三元组，桌面端每帧都会抛
 		# "not all arguments converted" —— 参数多了。所以分支里各写一次。
 		if GameBus.touch_enabled:
-			hud.set_prompt("建造模式：拖动调整位置 · 点「放置」确认 %s（%s）· %s"
+			# 「放置」键已合并进「使用」：触控端建造时按使用键就是放置
+			hud.set_prompt("建造模式：拖动调整位置 · 点「使用」确认 %s（%s）· %s"
 				% [item.name, cost_txt, tip])
 		else:
 			hud.set_prompt("建造模式：左键放置 %s（%s）  [R]旋转  [Esc]退出"

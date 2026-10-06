@@ -49,9 +49,11 @@ func _ready() -> void:
 				print("FAIL HUD SELF overlap %s vs %s" % [ra, rb])
 				bad += 1
 
+	# 【只收可见按钮】旋转 / 潜 平时是隐藏的，隐藏的东西不会造成视觉或操作冲突，
+	# 拿它去跑重叠断言只会误报；它们的显隐由第 10 步单独验。
 	var btns := []
 	for c in tc.get_children():
-		if c is Button:
+		if c is Button and (c as Button).visible:
 			btns.append(c)
 
 	# 1) 按钮两两不得重叠
@@ -174,6 +176,41 @@ func _ready() -> void:
 			bad += 1
 		_feed_touch(tc, 13, lr.get_center(), false)
 
+	# 10) 模式键：默认隐藏，开建造 / 入水才出现，且出现后仍不压住别的按钮
+	var rot := _find_btn_by_text(tc, "旋转")
+	var dive := _find_btn_by_text(tc, "潜")
+	if rot == null or dive == null:
+		print("FAIL missing mode buttons rot=%s dive=%s" % [rot != null, dive != null])
+		bad += 1
+	elif rot.visible or dive.visible:
+		print("FAIL mode buttons visible at rest rot=%s dive=%s" % [rot.visible, dive.visible])
+		bad += 1
+	else:
+		# 「放置」= 建造模式下的「使用」，是个纯重复入口，不许再加回来
+		if _find_btn_by_text(tc, "放置") != null:
+			print("FAIL 'place' button exists (duplicate of 'use' in build mode)")
+			bad += 1
+		GameBus.build_mode = true
+		GameBus.player_swimming = true
+		tc._sync_mode_buttons()
+		if not rot.visible or not dive.visible:
+			print("FAIL mode buttons not shown rot=%s dive=%s" % [rot.visible, dive.visible])
+			bad += 1
+		var vis: Array = []
+		for c in tc.get_children():
+			if c is Button and (c as Button).visible:
+				vis.append(c)
+		for i in vis.size():
+			for j in range(i + 1, vis.size()):
+				var va: Button = vis[i]
+				var vb: Button = vis[j]
+				if _overlap(va.get_global_rect(), vb.get_global_rect()):
+					print("FAIL OVERLAP(mode) '%s' vs '%s'" % [va.text, vb.text])
+					bad += 1
+		GameBus.build_mode = false
+		GameBus.player_swimming = false
+		tc._sync_mode_buttons()
+
 	print("buttons=%d joy_center=(%.0f, %.0f) joy_r=%.0f k=%.2f" % [btns.size(), jc.x, jc.y, jr_radius, tc._k])
 	print("==== CHECK %s bad=%d ====" % ["PASS" if bad == 0 else "FAIL", bad])
 	get_tree().quit(1 if bad > 0 else 0)
@@ -225,6 +262,13 @@ func _feed_drag(tc: CanvasLayer, idx: int, pos: Vector2) -> void:
 	e.index = idx
 	e.position = pos
 	tc._input(e)
+
+
+func _find_btn_by_text(tc: CanvasLayer, text: String) -> Button:
+	for c in tc.get_children():
+		if c is Button and (c as Button).text == text:
+			return c as Button
+	return null
 
 
 ## 找一个落在左半屏的按钮（摇杆区与按钮区重叠时用于验证优先级）

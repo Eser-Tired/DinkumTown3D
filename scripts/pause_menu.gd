@@ -1,7 +1,8 @@
 extends CanvasLayer
 class_name PauseMenu
 const U := preload("res://scripts/ui_layout.gd")
-## 游戏内暂停菜单 —— Esc / 系统返回键唤起，含：继续游戏、读取存档、设置、退出游戏
+## 游戏内暂停菜单 —— Esc / 系统返回键唤起，含：继续游戏、保存、加速时间、
+## 读取存档、设置、退出游戏
 ##
 ## 【为什么 layer = 40】必须盖住背包(30)、触控层(20)、HUD(10)。
 ## 差一层就会出现"点菜单按钮的同时角色也挥了一刀"。
@@ -18,6 +19,8 @@ const U := preload("res://scripts/ui_layout.gd")
 signal closed()
 signal quit_requested()
 signal load_requested(slot: int)
+signal save_requested()
+signal speed_requested()
 
 const C_TITLE := Color(1.0, 0.86, 0.62)
 const C_SHADOW := Color(0.16, 0.09, 0.03, 0.85)
@@ -113,6 +116,10 @@ func _build() -> void:
 	_main_box.add_child(_tip_label)
 
 	_main_btns.append(_add_button("继续游戏", func(): close()))
+	# 手机端把「存」「加速」两个系统小钮从屏幕上撤掉了，功能收在这里：
+	# 它们是低频操作，为它们长期占住右上角不划算，但也不能真的删掉。
+	_main_btns.append(_add_button("保存游戏", func(): save_requested.emit()))
+	_main_btns.append(_add_button("加速时间", func(): speed_requested.emit()))
 	_main_btns.append(_add_button("读取存档", func(): _show_panel("slots")))
 	_main_btns.append(_add_button("设置", func(): _show_panel("settings")))
 	_main_btns.append(_add_button("退出游戏", func(): _quit(), true))
