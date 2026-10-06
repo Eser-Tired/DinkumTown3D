@@ -1,0 +1,46 @@
+# 把 site/ 目录发布到 GitHub Pages。
+#
+# 为什么走 Actions 而不是 Pages 设置页里的「分支源」：
+# 分支源只认仓库根目录 / 或 /docs，而本站点在 site/ 子目录，下拉框里根本选不到。
+# Actions 把 site/ 打包成 artifact 直接交给 Pages，绕开这个限制。
+#
+# 注意：Actions 部署不经过 Jekyll，所以不需要 .nojekyll。
+
+name: Deploy site to Pages
+
+on:
+  push:
+    branches: [main]
+    # 只在这些路径变动时重跑，改游戏代码不会白跑一次部署。
+    # 必须把本文件自己也列进来：否则首次提交这个 workflow 时 paths 不匹配，
+    # 它会一直不触发，得手动 Run workflow 才能跑第一次。
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read      # 读仓库
+  pages: write        # 写 Pages
+  id-token: write     # deploy-pages 走 OIDC 鉴权，缺这行会直接失败
+
+concurrency:
+  group: pages
+  cancel-in-progress: true   # 连推多次时取消上一次，避免两次部署互相覆盖
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          # 关键：只传 site/ 子目录。写成 . 会把整个仓库（含 docs/ 的
+          # 200 多个文件和大量截图）全传上去。
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
