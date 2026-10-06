@@ -28,6 +28,8 @@ build/
 /realism_shots*/
 /asset_shots/
 /asset_shots*/
+/release_shots/
+/release_shots*/
 
 # 旧受限素材安装缓存；现版本全部运行美术在 assets/，不再读取 local_assets。
 /local_assets/
