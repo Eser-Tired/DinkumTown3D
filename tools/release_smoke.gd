@@ -1,5 +1,8 @@
 extends SceneTree
 ## 在实际导出资源上走完菜单→新游戏→移动；截图必须窗口模式，不能 headless。
+## 【每次发布都要改这里】与 tools/release_check.gd 的 EXPECT_VERSION 保持一致。
+const EXPECT_VERSION := "1.2.0"
+
 var failures := 0
 var output_dir := ""
 
@@ -13,7 +16,8 @@ func _run() -> void:
 	root.size = Vector2i(1440, 810)
 	change_scene_to_file("res://scenes/main_menu.tscn")
 	await create_timer(2.0).timeout
-	_check(current_scene._ver_label.text.begins_with("v1.1.0"), "主菜单发布版本")
+	_check(current_scene._ver_label.text.begins_with("v" + EXPECT_VERSION),
+		"主菜单发布版本（期望 v%s，实际 %s）" % [EXPECT_VERSION, current_scene._ver_label.text])
 	await _capture("menu.png")
 	current_scene._start_new()
 	await create_timer(3.0).timeout

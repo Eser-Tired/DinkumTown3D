@@ -1,14 +1,21 @@
 extends SceneTree
 ## 用编辑器 --main-pack <导出EXE或安卓assets ZIP> --script 本脚本审计实际发布资源。
 ## release 模板不能执行外部脚本，故运行包审计与 EXE 的真实启动测试分开进行。
+## 【每次发布都要改这里】包内版本必须与 project.godot 一致，
+## 否则说明导出用的是旧产物（本项目真发生过：改了版本号却忘了重导）。
+const EXPECT_VERSION := "1.2.0"
+
 var failures := 0
 var scene_count := 0
 var license_count := 0
 
 func _initialize() -> void:
-	_check(ProjectSettings.get_setting("application/config/version", "") == "1.1.0", "运行包版本正确")
+	_check(ProjectSettings.get_setting("application/config/version", "") == EXPECT_VERSION,
+		"运行包版本正确（期望 %s，实际 %s）" % [EXPECT_VERSION,
+			ProjectSettings.get_setting("application/config/version", "")])
 	_check(not DirAccess.dir_exists_absolute("res://docs"), "运行包不含文档截图")
 	_check(not DirAccess.dir_exists_absolute("res://tools"), "运行包不含开发测试")
+	_check(not DirAccess.dir_exists_absolute("res://site"), "运行包不含介绍页资源")
 	_check(not DirAccess.dir_exists_absolute("res://local_assets"), "运行包不依赖旧素材目录")
 	for folder in ["quaternius", "characters", "animals", "kenney", "town"]:
 		for file in DirAccess.get_files_at("res://assets/" + folder):
