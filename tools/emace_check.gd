@@ -44,7 +44,7 @@ func _run() -> void:
 		if node.has_meta("asset_id"):
 			asset_nodes += 1
 	_ok(asset_nodes == 4 * int(installed), "三栋小屋与商店全部替换")
-	_ok(hut.find_children("*", "StaticBody3D", true, false).size() == 1, "小屋只有一套实体碰撞")
+	_ok(hut.find_children("*", "StaticBody3D", true, false).size() == 3, "外壳、家具、活动门各一套实体碰撞")
 	var crate: RigidBody3D = m.physics_props[0]
 	_ok(crate.has_node("AssetVisual") == installed, "第一只木箱使用资源包或缺包回退")
 	_ok(m.physics_props[1].has_node("AssetVisual") == installed, "第二只木箱同步替换或缺包回退")
@@ -63,8 +63,8 @@ func _run() -> void:
 		var box_bounds: AABB = crate.get_node("AssetVisual").get_meta("visual_bounds")
 		_ok(box_bounds.position.is_equal_approx(Vector3.ONE * -0.475) and box_bounds.size.is_equal_approx(Vector3.ONE * 0.95), "木箱外观与实体盒精确对齐")
 		var entrance_local: Vector3 = hut.to_local(Vector3(h.entrance_origin.x, hut.global_position.y, h.entrance_origin.y))
-		var actual_door := entrance_local + Vector3(0, 0, 2.9)
-		_ok(absf(actual_door.x) < 0.002 and absf(actual_door.z - 2.1) < 0.002, "交互点落在CC0房屋前门中轴")
+		var actual_door := entrance_local + Vector3(0, 0, 3.3)
+		_ok(absf(actual_door.x) < 0.002 and absf(actual_door.z - 3.3) < 0.002, "交互点落在CC0房屋前门中轴")
 	var center: Vector2 = h.get("entrance_origin", h.pos)
 	var dp := InteriorS.door_point(center, h.rot, "hut")
 	var ep: Vector2 = h.get("exit_point", InteriorS.exit_point(h.pos, h.rot, "hut"))
@@ -76,11 +76,11 @@ func _run() -> void:
 	_ok(str(m._door_target().get("id", "")) == "hut_0", "真实门前仍能触发进屋")
 	m._interact()
 	await _wait(0.8)
-	_ok(m.house_id == "hut_0" and m.player.indoor, "替换小屋仍可进入原室内")
+	_ok(m.house_id == "" and not m.player.indoor and m.interior.space_of("hut_0").open, "门口交互开门但不传送")
 	m._exit_house()
 	await _wait(0.8)
-	_ok(m.house_id == "" and not m.player.indoor, "替换小屋仍可正常出门")
-	_ok(Vector2(m.player.global_position.x, m.player.global_position.z).distance_to(ep) < 0.08, "出门落在新的门廊外侧")
+	_ok(m.house_id == "" and not m.player.indoor, "门口调用不强制改变室内状态")
+	_ok(Vector2(m.player.global_position.x, m.player.global_position.z).distance_to(ep) < 0.08, "开门后角色仍在原门廊外侧")
 	# 从出门点实际走向门廊，不用传送到台阶上冒充可达。
 	var face := InteriorS.door_dir(h.rot)
 	m.player.yaw = 0.0
@@ -116,7 +116,7 @@ func _run() -> void:
 		_ok(str(m._door_target().get("id", "")) == house.id and m.player.is_on_floor(), house.id + "出口站稳并能触发真实门")
 		m._interact()
 		await _wait(0.8)
-		_ok(m.house_id == house.id and m.player.indoor, house.id + "可进入")
+		_ok(m.house_id == "" and not m.player.indoor and m.interior.space_of(str(house.id)).open, house.id + "门可打开且不传送")
 		m._exit_house()
 		await _wait(0.8)
-		_ok(not m.player.indoor and m.house_id == "" and Vector2(m.player.global_position.x, m.player.global_position.z).distance_to(exit) < 0.08, house.id + "可退出并回到新门廊外")
+		_ok(not m.player.indoor and m.house_id == "" and Vector2(m.player.global_position.x, m.player.global_position.z).distance_to(exit) < 0.08, house.id + "门交互不会改变角色实际位置")

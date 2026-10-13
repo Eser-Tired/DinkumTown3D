@@ -1,5 +1,5 @@
 extends RefCounted
-## 世界层=1，角色层=2，动态道具层=4。
+## 世界层=1，角色层=2，动态道具层=4，相机遮挡层=16（仅建筑及家具）。
 ## 只在正式放置时建碰撞，预览和菜单背景仍只是模型。
 
 
@@ -8,7 +8,7 @@ static func attach(root: Node3D, flora := false) -> void:
 		return
 	var body := StaticBody3D.new()
 	body.name = "Solid"
-	body.collision_layer = 1
+	body.collision_layer = 17 if root.get_meta("camera_obstacle", false) else 1
 	body.collision_mask = 6
 	# 工厂会缩放树木；把尺寸烘进 Shape，避免缩放物理节点。
 	body.scale = Vector3.ONE / root.scale

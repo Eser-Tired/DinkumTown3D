@@ -57,13 +57,13 @@ func _ready() -> void:
 		groups += 1
 		for i in mi.multimesh.instance_count:
 			var p: Vector3 = mi.position + mi.multimesh.get_instance_transform(i).origin
-			if not Scatter.allowed(main.terrain, Vector2(p.x, p.z)) or absf(p.y - float(main.terrain.height_at(p.x, p.z)) + 0.025) > 0.002:
+			if not Scatter.allowed(main.terrain, Vector2(p.x, p.z)) or main._inside_building(Vector2(p.x, p.z)) or absf(p.y - float(main.terrain.height_at(p.x, p.z)) + 0.025) > 0.002:
 				if bad < 2:
 					print("GEOMETRY_DIAG ", mi.name, " instance=", i, " p=", p, " ground=", main.terrain.height_at(p.x, p.z), " allowed=", Scatter.allowed(main.terrain, Vector2(p.x, p.z)))
 				bad += 1
 			count += 1
 	_ok(count == int(dense.get_meta("count")) and count > 30000, "实际新增地被超过3万，计数一致")
-	_ok(bad == 0, "全图逐点检查：贴地、水域、农田和通道 bad=0")
+	_ok(bad == 0, "全图逐点检查：贴地、水域、农田、通道与真实房间 bad=0")
 	_ok(dense.find_children("*", "CollisionObject3D", true, false).is_empty(), "地被不阻挡玩家/动物")
 	var repeat := Scatter.build(main, main.terrain, 20260921)
 	_ok(repeat.get_meta("fingerprint") == dense.get_meta("fingerprint"), "同种子全图分布完全一致")
@@ -106,11 +106,31 @@ func _ready() -> void:
 	_ok(not animal.dead and animal.hp == animal.max_hp and animal.rig.current != "Death", "重生恢复血量和活动动画")
 	print("NATURE_STATS catalog=", models, " catalog_triangles=", triangles, " dense=", count, " chunks=", groups, " bad=", bad)
 	var original_grass := 0
+	var indoor_grass := 0
 	for mi in main.get_children():
 		if mi is MultiMeshInstance3D:
 			for i in mi.multimesh.instance_count:
 				if mi.multimesh.get_instance_transform(i).origin.y > -9000:
 					original_grass += 1
+					var position: Vector3 = mi.global_transform * mi.multimesh.get_instance_transform(i).origin
+					if main._inside_building(Vector2(position.x, position.z)): indoor_grass += 1
+	_ok(indoor_grass == 0, "旧地被也不穿入真实房间")
 	print("DENSITY_BASE=", original_grass, " DENSITY_TOTAL=", original_grass + count)
+	# 在真实建造调用之前放三个标记实例：屋内那个必须被清掉，屋外两个必须保留。
+	var spot: Vector2 = main._random_spot(45, 45, 6)
+	var fixture := MultiMeshInstance3D.new()
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = BoxMesh.new()
+	mm.instance_count = 3
+	for index in 3:
+		var point := spot + Vector2(index * 4.0, 0)
+		mm.set_instance_transform(index, Transform3D(Basis.IDENTITY, Vector3(point.x, main.terrain.height_at(point.x, point.y), point.y)))
+	fixture.multimesh = mm
+	main.add_child(fixture)
+	var tent: Node3D = main._make_build("tent")
+	main._place(tent, spot.x, spot.y, 0)
+	main._register_house("tent", spot, 0, 0, "_vegetation", true)
+	_ok(mm.instance_count == 2 and absf(mm.get_instance_transform(0).origin.x - spot.x - 4) < 0.001, "玩家自建帐篷清掉原有屋内植被并保留外侧实例")
 	print("==== NATURE CHECK DONE checks=%d fails=%d ====" % [checks, fails])
 	get_tree().quit(1 if fails else 0)

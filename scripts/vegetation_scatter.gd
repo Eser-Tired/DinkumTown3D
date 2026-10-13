@@ -52,6 +52,8 @@ static func build(parent: Node3D, terrain: Node3D, map_seed: int) -> Node3D:
 				chunks[cell] = []
 			var position := Vector3(p.x, float(terrain.height_at(p.x, p.y)) - 0.025, p.y)
 			var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.8, 1.3))
+			# 清掉真实房屋占地；在旋转和缩放采样之后判定，保持其他草丛的位置与随机外观。
+			if parent.has_method("_inside_building") and parent._inside_building(p): continue
 			chunks[cell].append(Transform3D(basis, position))
 			signature.append(str(position))
 			count += 1

@@ -202,7 +202,7 @@ func _build() -> void:
 	add_child(help_panel)
 	help_label = _label(16, Vector2(34, 650), 540)
 	help_label.size = Vector2(540, 140)
-	help_label.text = "WASD/方向键 移动 · Shift 奔跑 · 空格 跳跃\n鼠标右键拖拽 转视角 · 滚轮 缩放\nE 采集 · 左键 攻击 · Q 换武器 · 1-4 切物品栏\nB 建造模式 · 建造中 1-4 选建筑 · 左键放置\n进水里自动游泳 · Ctrl 下潜、松开上浮（憋气有限）\nI 背包 · F 交互（进屋 / 床边睡觉 / 农事）· G 换作物 · T 加速时间 · H 隐藏帮助\nF2 保存 · F3 读取 · M 静音 · Esc 暂停菜单"
+	help_label.text = "WASD/方向键 移动 · Shift 奔跑 · 空格 跳跃\n鼠标右键拖拽 转视角 · 滚轮 缩放\nE 采集 · 左键 攻击 · Q 换武器 · 1-4 切物品栏\nB 建造模式 · 建造中 1-4 选建筑 · 左键放置\n进水里自动游泳 · Ctrl 下潜、松开上浮（憋气有限）\n走近推门进出 · F 开关门 / 床边睡觉 / 农事 · I 背包\nG 换作物 · T 加速时间 · H 隐藏帮助\nF2 保存 · F3 读取 · M 静音 · Esc 暂停菜单"
 	add_child(help_label)
 
 	# 浮动提示

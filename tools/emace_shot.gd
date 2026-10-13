@@ -73,13 +73,13 @@ func _ready() -> void:
 			if body.kind == "log":
 				break
 	for kind in ["hut", "shop"]:
-		var space: Dictionary = m.interior.ensure("shot_" + kind, kind, m.map_seed)
-		m.interior.show_only("shot_" + kind)
+		var space: Dictionary = m.interior.space_of("hut_0" if kind == "hut" else "shop_0")
+
 		var room: Node3D = space.node
-		camera.global_position = room.position + Vector3(0.0, 2.4, 2.5 if kind == "hut" else 3.1)
-		camera.look_at(room.position + Vector3(0, 1.0, -1.2))
+		camera.global_position = room.to_global(Vector3(0.0, 2.4, 2.5 if kind == "hut" else 3.1))
+		camera.look_at(room.to_global(Vector3(0, 1.0, -1.2)))
 		await _shot("interior_" + kind)
-	m.interior.hide_all()
+
 	print("==== EMACE SHOT DONE ====")
 	get_tree().quit()
 

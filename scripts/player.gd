@@ -43,19 +43,18 @@ var diving := false             ## 是否正在下潜
 var breath := 1.0               ## 剩余憋气 0..1
 var _water_level := 0.0         ## 水面高度（由 terrain 提供）
 
-# —— 室内（飞地）模式 ——
-## 进屋后玩家被传送到远离地图的室内空间（见 interior.gd）。那里既没有地形也没有水，
-## 所以"贴地"和"是不是水"这两件事必须整体换数据源：继续问 terrain.height_at
-## 会被户外地形高度硬拉回地表，玩家会站在半空中或者直接掉回小镇。
+# —— 真实室内的环境与相机状态 ——
+## 只切换防雨、水域判定与相机上限；运动始终走同一套世界碰撞，不传送也不封闭门口。
 var indoor := false
 var floor_y := 0.0              ## 室内地板高度（世界 y）
 var bounds_center := Vector2.ZERO   ## 室内可行走矩形中心（xz）
 var bounds_half := Vector2(112.0, 112.0)   ## 半宽 / 半深
 ## 第三人称在屋里必须拉近：默认 9 米的机位直接穿到墙外，屏幕上一半是墙背面。
-## 上限 4.0 留给玩家用滚轮微调；进屋默认值 2.8 是"屋子宽 ~6 米时相机仍在墙内"算出来的。
+## 上限4米，实际机位还由建筑与家具的球形扫掠收近。
 const INDOOR_CAM_MAX := 4.0
-const INDOOR_CAM_ENTER := 2.8
-var _cam_dist_outdoor := 9.0
+var _indoor_cam_dist := 3.2
+
+
 
 var cam_yaw: Node3D
 var cam_pitch: Node3D
@@ -95,6 +94,7 @@ func _ready() -> void:
 	cam_yaw.add_child(cam_pitch)
 	cam = Camera3D.new()
 	cam.name = "Camera3D"
+	cam.near = 0.08
 	cam.position = Vector3(0.0, 0.0, cam_dist)
 	cam_pitch.add_child(cam)
 
@@ -124,38 +124,30 @@ func setup(terr: Node3D, obs: Array, spawn2: Vector2) -> void:
 	model.rotation.y = yaw + PI
 
 
-## 传送进室内：切换地面参考、可行走矩形，并拉近镜头。
+## 穿过真实门口后更新室内参考，不改变位置、速度和用户的户外镜头距离。
 ## cols 保留原接口；家具避让已由室内实体碰撞负责。
 func enter_indoor(fy: float, center: Vector2, half: Vector2, cols: Array) -> void:
+	if indoor: return
 	indoor = true
 	floor_y = fy
 	bounds_center = center
 	bounds_half = half
 	obstacles = cols
-	_cam_dist_outdoor = cam_dist
-	cam_dist = minf(cam_dist, INDOOR_CAM_ENTER)
+
 	# 水里进屋（虽然目前没有水上的屋子）不该带着游泳/下潜状态进屋
 	swimming = false
 	diving = false
 	swim_depth = 0.0
-	jump_h = 0.0
-	jump_v = 0.0
-	on_ground = true
-	restore_motion(global_position)
 
 
 ## 回到户外：还原地形贴地、世界边界与镜头距离
 func exit_indoor(cols: Array) -> void:
+	if not indoor: return
 	indoor = false
 	obstacles = cols
-	cam_dist = _cam_dist_outdoor
 	swim_depth = 0.0
 	swimming = false
 	diving = false
-	jump_h = 0.0
-	jump_v = 0.0
-	on_ground = true
-	restore_motion(global_position)
 
 
 func _mi(mesh: Mesh, m: Material, pos := Vector3.ZERO, rot := Vector3.ZERO, scl := Vector3.ONE) -> MeshInstance3D:
@@ -240,12 +232,15 @@ func _input(event: InputEvent) -> void:
 		pitch = clampf(pitch - event.relative.y * 0.004, -1.15, 0.55)
 	elif event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			cam_dist = maxf(3.5, cam_dist - 0.9)
+			_zoom_camera(-0.9)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			cam_dist = minf(22.0, cam_dist + 0.9)
-			# 屋里再往后拉就穿墙了，上限压住（室外不生效）
-			if indoor:
-				cam_dist = minf(cam_dist, INDOOR_CAM_MAX)
+			_zoom_camera(0.9)
+
+
+func _zoom_camera(amount: float) -> void:
+	# 室内微调不覆盖用户原有的户外距离，离开房屋后按原距离平滑回拉。
+	if indoor: _indoor_cam_dist = clampf(_indoor_cam_dist + amount, 1.4, INDOOR_CAM_MAX)
+	else: cam_dist = clampf(cam_dist + amount, 3.5, 22.0)
 
 
 func _physics_process(dt: float) -> void:
@@ -257,12 +252,11 @@ func _physics_process(dt: float) -> void:
 		pitch = clampf(pitch - GameBus.touch_look.y * 0.004, -1.15, 0.55)
 		GameBus.touch_look = Vector2.ZERO
 	if GameBus.touch_zoom != 0.0:
-		cam_dist = clampf(cam_dist + GameBus.touch_zoom, 3.5, 22.0)
+		_zoom_camera(GameBus.touch_zoom)
 		GameBus.touch_zoom = 0.0
 
 	cam_yaw.rotation.y = yaw
 	cam_pitch.rotation.x = pitch
-	cam.position.z = lerpf(cam.position.z, cam_dist, 0.15)
 
 	# —— 输入 ——
 	var ix := 0.0
@@ -299,7 +293,7 @@ func _physics_process(dt: float) -> void:
 	if global_position.distance_to(_last_physics_pos) > 2.0:
 		velocity = Vector3.ZERO
 		_motion_restored = true
-	# 室内位于地图之外，地面参考和边界仍用室内规格，移动统一走实体碰撞。
+	# 室内地板作为非法存档位置的修正参考；正常贴地与过门槛由实体物理负责。
 	var gy: float = floor_y if indoor else terrain.height_at(global_position.x, global_position.z)
 	swim_depth = 0.0 if indoor else _water_depth(global_position.x, global_position.z)
 	swimming = swim_depth > SWIM_MIN and not _dry_support()
@@ -339,12 +333,10 @@ func _physics_process(dt: float) -> void:
 	var motion_origin := global_position
 	move_and_slide()
 	_motion_restored = false
-	if indoor:
-		global_position.x = clampf(global_position.x, bounds_center.x - bounds_half.x, bounds_center.x + bounds_half.x)
-		global_position.z = clampf(global_position.z, bounds_center.y - bounds_half.y, bounds_center.y + bounds_half.y)
-	else:
-		global_position.x = clampf(global_position.x, -112.0, 112.0)
-		global_position.z = clampf(global_position.z, -112.0, 112.0)
+	# 房屋内外都是地图上的真实空间，墙由物理阻挡；不能用旧矩形 clamp 把门口封死。
+	global_position.x = clampf(global_position.x, -112.0, 112.0)
+	global_position.z = clampf(global_position.z, -112.0, 112.0)
+	_update_camera(dt)
 	on_ground = is_on_floor() and not swimming
 	jump_v = velocity.y
 	jump_h = maxf(0.0, global_position.y - gy) if not swimming else 0.0
@@ -424,6 +416,25 @@ func _physics_process(dt: float) -> void:
 	var movement := global_position - motion_origin
 	var actual_speed := Vector2(movement.x, movement.z).length() / maxf(dt, 0.0001)
 	rig.update_player(self, dt, actual_speed > 0.08, running, actual_speed)
+
+
+func _update_camera(dt: float) -> void:
+	# 仅室内抬高注视点。户外继续原机位，避免改变游泳时相机入水与水下遮罩的阈值。
+	cam_yaw.position.y = lerpf(cam_yaw.position.y, 1.35 if indoor else 0.0, 1.0 - exp(-14.0 * dt))
+	var desired := _indoor_cam_dist if indoor else cam_dist
+	var query := PhysicsShapeQueryParameters3D.new()
+	var sphere := SphereShape3D.new()
+	sphere.radius = 0.18
+	query.shape = sphere
+	query.transform = Transform3D(Basis.IDENTITY, cam_pitch.global_position)
+	query.motion = cam_pitch.global_basis.z * desired
+	query.collision_mask = 16
+	query.exclude = [get_rid()]
+	var result := get_world_3d().direct_space_state.cast_motion(query)
+	var safe := maxf(0.20, desired * result[0] - 0.08)
+	# 收近立即执行，回拉平滑；否则插值的相机仍会短暂穿过门楣和墙面。
+	cam.position.z = safe if safe < cam.position.z else lerpf(cam.position.z, safe, 1.0 - exp(-8.0 * dt))
+	model.visible = cam.position.z > 0.65
 
 
 func _dry_support() -> bool:
@@ -541,7 +552,7 @@ func head_underwater() -> bool:
 ## 相机是否在水面以下（HUD 的水下遮罩用）。
 ## 与 head_underwater 分开：下潜时相机先入水、头后入水，两者不是一回事。
 func camera_underwater() -> bool:
-	if cam == null:
+	if cam == null or indoor:
 		return false
 	return cam.global_position.y < _water_level
 

@@ -85,10 +85,11 @@ var pause_menu: PauseMenu
 ## 可进入建筑登记表。每项 {id, kind, title, pos:Vector2, rot}
 ## id 必须稳定（同一座房子每次开局都算出来同一个），否则室内家具的随机摆设会变。
 var houses: Array = []
+var _last_placed: Node3D
 ## 当前所在的建筑 id，"" 表示在户外
 var house_id := ""
-## 出门后的落点。进门时就定好，存档也写它——室内坐标是飞地里的位置，
-## 写进存档再读出来会落在一片虚空里。
+## 门外参考点用于提示和诊断；存档保存玩家实际位置。
+
 var outdoor_exit := Vector3.ZERO
 ## 【为什么写成 Node3D 而不是 InteriorSystem】新脚本的 class_name 要等 Godot 重新
 ## 扫一遍工程才进全局类缓存，在那之前用 class_name 做类型注解会让 main.gd 直接
@@ -135,6 +136,10 @@ func _ready() -> void:
 	terrain.set_map_seed(map_seed)
 	add_child(terrain)
 
+	# 房屋内部与外壳在同一坐标创建；必须在登记第一栋建筑前准备室内管理器。
+	interior = InteriorS.new()
+	interior.name = "Interiors"
+	add_child(interior)
 	_build_town()
 	_scatter_flora()
 	preload("res://scripts/vegetation_scatter.gd").build(self, terrain, map_seed)
@@ -184,12 +189,6 @@ func _ready() -> void:
 	farm.name = "Farm"
 	add_child(farm)
 	farm.setup(self, terrain, dn)
-
-	# —— 室内空间（飞地，见 interior.gd）——
-	# 放在 player 之后：进门时要读写 player 的状态。
-	interior = InteriorS.new()
-	interior.name = "Interiors"
-	add_child(interior)
 
 	# —— 睡觉面板（默认隐藏，layer 35：盖住背包、被暂停菜单盖住）——
 	sleep_panel = SleepS.new()
@@ -470,6 +469,7 @@ func _place(node: Node3D, x: float, z: float, rot_y := 0.0, scl := 1.0) -> void:
 	node.scale = Vector3(scl, scl, scl)
 	CollisionS.attach(node)
 	add_child(node)
+	_last_placed = node
 	var r: float = node.get_meta("collide_radius", 0.0)
 	if r > 0.0:
 		colliders.append({"node": node, "pos": Vector2(x, z), "r": r * scl})
@@ -514,7 +514,7 @@ func _collect_anims(root: Node) -> void:
 func _adapt_house_entry(model: Node3D) -> void:
 	if not model.has_meta("entrance_origin"):
 		return
-	# 房屋和商店都按网格实测的侧门/台阶更新，不能只迁移第一栋入口。
+	# 所有建筑按同一组元数据确定前门与门槛，外壳和真实室内不能各抄一套位置。
 	var offset: Vector2 = model.get_meta("entrance_origin")
 	var origin: Vector3 = model.transform * Vector3(offset.x, 0, offset.y)
 	houses[-1]["entrance_origin"] = Vector2(origin.x, origin.z)
@@ -656,17 +656,27 @@ func _register_house(kind: String, pos2: Vector2, rot: float, idx := 0,
 		"rot": rot,
 		"built": built,
 	})
+	if is_instance_valid(_last_placed):
+		var space: Dictionary = interior.register(id, kind, map_seed, _last_placed)
+		houses[-1]["node"] = _last_placed
+		houses[-1]["entrance_origin"] = pos2
+		var exit2 := InteriorS.exit_point(pos2, rot, kind)
+		houses[-1]["exit_point"] = exit2
+		if built: interior.clear_groundcover(self, _last_placed, kind)
 	return id
 
 
-## 玩家脚下够得着的那扇门（户外才有意义）
+func _inside_building(point: Vector2, margin := 0.25) -> bool:
+	return interior.covers_ground(point, margin)
+
+
+## 玩家够得着的门，室内外均可操作。
 func _door_target() -> Dictionary:
-	if house_id != "" or player == null:
+	if player == null:
 		return {}
 	for h in houses:
 		var hd: Dictionary = h
-		if InteriorS.at_door(player.global_position, hd.get("entrance_origin", hd.get("pos", Vector2.ZERO)),
-				float(hd.get("rot", 0.0)), str(hd.get("kind", "hut"))):
+		if interior.near_door(str(hd.id), player.global_position):
 			return hd
 	return {}
 
@@ -678,96 +688,58 @@ func _house_title(id: String) -> String:
 	return "屋子"
 
 
-## F 键的语义：屋里就是"离开"，屋外优先"进屋"，都不沾边才落到农事上。
-## 农事原来独占 F，现在让位给门——站在门口按 F 却去锄地才叫反直觉。
+## 门口 F / 使用开关门，床边睡觉；进出必须用实际走动完成。
 func _interact() -> void:
-	if player == null:
+	if player == null: return
+	if _bed_near():
+		_open_sleep()
 		return
-	if house_id != "":
-		# 屋里只有一个交互键：站在床边是睡觉，其余位置是出门。
-		# 不做成两个键（比如 F 睡觉 / Esc 出门）：床上按 F 却把人赶出屋子才是反直觉。
-		if _bed_near():
-			_open_sleep()
-			return
-		_exit_house()
+	var house := _door_target()
+	if not house.is_empty():
+		var space: Dictionary = interior.space_of(str(house.id))
+		interior.set_open(str(house.id), not bool(space.open))
 		return
-	var h := _door_target()
-	if not h.is_empty():
-		_enter_house(h)
-		return
-	if farm != null:
-		farm.interact(player.global_position)
+	if house_id == "" and farm != null: farm.interact(player.global_position)
 
+func _enter_house(house: Dictionary) -> void:
+	# 旧调用入口只负责推开门，不允许测试或其它模块绕开走动去传送。
+	interior.set_open(str(house.get("id", "")), true)
 
-func _enter_house(h: Dictionary) -> void:
-	if interior == null or player == null or terrain == null:
-		return
-	if interior.busy:
-		return
-	var id := str(h.get("id", ""))
-	var kind := str(h.get("kind", "hut"))
-	var sp: Dictionary = interior.ensure(id, kind, map_seed)
-	if sp.is_empty():
-		return
-	sp["title"] = str(h.get("title", sp.get("title", "屋子")))
+func _exit_house(_silent := false) -> void:
+	if house_id != "": interior.set_open(house_id, true)
 
-	# 出门落点现在就定死：出门、存档都用它，避免"退出点"被玩家走动带偏
-	var pos2: Vector2 = h.get("pos", Vector2.ZERO)
-	var ex2: Vector2 = h.get("exit_point", InteriorS.exit_point(pos2, float(h.get("rot", 0.0)), kind))
-	outdoor_exit = Vector3(ex2.x, terrain.height_at(ex2.x, ex2.y) + 0.1, ex2.y)
-
-	# 建造模式的预览是跟着视线落在地面上的，屋里没有地；带着它进屋会留下一个
-	# 悬空的半透明帐篷。所以进门一律先收掉建造模式。
+func _apply_enter(id: String, space: Dictionary) -> void:
+	house_id = id
+	player.enter_indoor(float(space.floor_y), space.center, space.half, colliders)
+	var frame: Node3D = space.frame
+	var point := InteriorS.exit_point(Vector2(frame.position.x, frame.position.z), frame.rotation.y, str(space.kind))
+	outdoor_exit = Vector3(point.x, terrain.height_at(point.x, point.y), point.y)
 	if build_mode:
 		_set_build_mode(false)
 		_refresh_preview()
 		_restore_hotbar_after_build()
-
-	interior.warp(func(): _apply_enter(id, sp))
-
-
-func _apply_enter(id: String, sp: Dictionary) -> void:
-	house_id = id
-	interior.show_only(id)
-	player.global_position = sp.get("spawn", Vector3.ZERO)
-	player.yaw = float(sp.get("spawn_yaw", 0.0))
-	player.pitch = -0.22
-	player.enter_indoor(float(sp.get("floor_y", 40.0)), sp.get("center", Vector2.ZERO),
-		sp.get("half", Vector2(4.0, 4.0)), sp.get("colliders", []))
-	# 屋里不该下雨：雨幕是挂在玩家身上的粒子柱，不关掉就成了"室内暴雨"
 	_on_weather(season.weather if season != null else "clear")
-	if hud != null:
-		hud.toast(str(sp.get("title", "屋子")))
-
-
-func _exit_house(silent := false) -> void:
-	if house_id == "" or interior == null:
-		return
-	if interior.busy:
-		return
-	interior.warp(func(): _apply_exit(silent))
-
+	if hud != null: hud.toast(str(space.title))
 
 func _apply_exit(_silent := false) -> void:
 	house_id = ""
-	if player != null:
-		player.exit_indoor(colliders)
-		player.global_position = outdoor_exit
-		player.pitch = -0.35
-	if interior != null:
-		interior.hide_all()
+	if player != null: player.exit_indoor(colliders)
 	_on_weather(season.weather if season != null else "clear")
-	if hud != null and not _silent:
-		hud.toast("已出门")
 
+func _sync_house_context() -> void:
+	var space: Dictionary = interior.space_at(player.global_position)
+	var id := str(space.get("id", ""))
+	if id == house_id: return
+	if id.is_empty(): _apply_exit(true)
+	else: _apply_enter(id, space)
+
+func _physics_process(dt: float) -> void:
+	if player == null or interior == null: return
+	interior.tick_doors(player, dt)
+	_sync_house_context()
 
 # ——————————————— 睡觉 ———————————————
-## 床边判定半径：玩家到床（或睡袋）中心的水平距离小于它就认为"站在床边"。
-## 【下限】床的避让圆是 1.2，加上玩家半径 0.42 → 最近只能站到 1.62 米，
-## 判定半径必须比它大，否则会出现"贴着床却按不出睡觉"。
-## 【上限】它也不能太大：帐篷里的出生点离睡袋只有 2 米出头，判定圈一旦罩住出生点，
-## 玩家一进门按 F 就是"睡觉"而不是"出门"——门都出不去（真踩过）。
-## 1.75 落在 1.62 与 2.04 之间，两头都留了余量。
+## 床边1.75米范围内优先睡觉，留出角色胶囊与床沿之间的交互余量；出门始终靠实际走动。
 const SLEEP_REACH := 1.75
 
 
@@ -892,6 +864,10 @@ func _scatter_flora() -> void:
 				mm.set_instance_transform(i, Transform3D(Basis(), Vector3(p.x, -9999.0, p.y)))
 				continue
 			var b := Basis().rotated(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.7, 1.4))
+			# 保留原随机数消费顺序，只隐藏落在真实房间下的草，旧采集点与动物不能被重排。
+			if _inside_building(p):
+				mm.set_instance_transform(i, Transform3D(Basis(), Vector3(p.x, -9999.0, p.y)))
+				continue
 			mm.set_instance_transform(i, Transform3D(b, Vector3(p.x, y - 0.05, p.y)))
 		var mmi := MultiMeshInstance3D.new()
 		mmi.multimesh = mm
@@ -1785,13 +1761,16 @@ func _process(dt: float) -> void:
 			if _bed_near():
 				hud.set_prompt(_hint("[F] 睡觉", "点「使用」睡觉"))
 			else:
-				# 屋里按 F 直接出门，不要求走回门口：房间就这么大，
-				# 非要走到门垫上才能出去只会让人烦躁。
-				hud.set_prompt(_hint("[F] 离开 %s", "点「使用」离开 %s") % _house_title(house_id))
+				var door := _door_target()
+				if not door.is_empty():
+					var opened: bool = interior.space_of(str(door.id)).open
+					hud.set_prompt(_hint("[F] 关门 · 走回门口离开", "点「使用」关门 · 走出门口离开") if opened else _hint("[F] 推开房门", "点「使用」推开房门"))
+				else:
+					hud.set_prompt("走回门口即可离开")
 		else:
 			var hh := _door_target()
 			if not hh.is_empty():
-				hud.set_prompt(_hint("[F] 进入 %s", "点「使用」进入 %s") % str(hh.get("title", "屋子")))
+				hud.set_prompt(_hint("走近推门 · [F] 开关门", "走近推门 · 点「使用」开关门"))
 			else:
 				var n := _nearest_resource()
 				var beast := _nearest_critter()
@@ -1929,17 +1908,15 @@ func give_item(kind: String, n: int) -> void:
 # ——————————————— 存档契约 ———————————————
 func serialize() -> Dictionary:
 	var pp := player.global_position
-	# 人在屋里时写门外那个点：室内坐标是飞地里的位置，
-	# 读档时飞地还没建（是懒加载的），玩家会直接掉进虚空。
-	if house_id != "":
-		pp = outdoor_exit
+	# 室内与户外共用世界坐标，保存实际位置和速度，读档后可以仍站在房间里。
 	return {
 		"inv": inv.duplicate(),
 		"time": dn.time,
 		"day": dn.day_count,
 		"pos": [pp.x, pp.y, pp.z],
-		# 室内存的是门外落点，不能把室内跳跃速度带到户外读档位置。
-		"player_velocity": PhysicsPropS._vec(Vector3.ZERO if house_id != "" else player.velocity),
+
+		"player_velocity": PhysicsPropS._vec(player.velocity),
+	"doors": interior.serialize_doors(),
 		"yaw": player.yaw,
 		"pitch": player.pitch,
 		"harvested": harvested_ids.duplicate(),
@@ -1993,8 +1970,8 @@ func _deserialize_critters(arr: Variant) -> void:
 
 
 func deserialize(d: Dictionary) -> void:
-	# 读档一律回到户外。存档不记室内状态（见 serialize），而保存可能是在屋里按的；
-	# 这里同步送出门，不用等过场动画——读档本身就是一次跳变，再淡入淡出反而拖沓。
+	# 先清理旧环境标志，恢复坐标、建筑和门后重新根据位置识别室内。
+	# 此处不移动玩家，也不隐藏实际房间。
 	if house_id != "":
 		_apply_exit(true)
 
@@ -2029,6 +2006,8 @@ func deserialize(d: Dictionary) -> void:
 	# 帐篷同时占着 houses 里的一条，一并清掉，否则旧帐篷的入口会留在镇上。
 	# 【按 built 而不是按 kind 过滤】镇上的帐篷营地 kind 也是 tent，
 	# 按 kind 清会把它们一起删掉，而那些帐篷不会随存档重建——读档后营地就进不去了。
+	for h in houses:
+		if bool(h.get("built", false)): interior.forget(str(h.id))
 	houses = houses.filter(func(h): return not bool(h.get("built", false)))
 	for c in get_children():
 		if c is Node3D and c.has_meta("player_built"):
@@ -2055,6 +2034,8 @@ func deserialize(d: Dictionary) -> void:
 				var brot := float(bd.get("rot", 0.0))
 				_place(nb, bx, bz, brot)
 				_register_house(str(bd.get("kind", "")), Vector2(bx, bz), brot, bi, "", true)
+	interior.restore_doors(d.get("doors", {}))
+	_sync_house_context()
 	dn.collect_night_lights(self)
 	if season != null:
 		_on_weather(str(season.weather))

@@ -78,12 +78,12 @@ func _ready() -> void:
 		var point: Vector2 = preload("res://scripts/interior.gd").door_point(origin, h.rot, h.kind)
 		var exit: Vector2 = h.get("exit_point", preload("res://scripts/interior.gd").exit_point(h.pos, h.rot, h.kind))
 		_ok(point.distance_to(exit) < 3.8, h.id + "门与出口在交互范围")
-	var interior: Dictionary = main.interior.ensure("full_check_hut", "hut", main.forced_map_seed)
-	var shop: Dictionary = main.interior.ensure("full_check_shop", "shop", main.forced_map_seed)
+	var interior: Dictionary = main.interior.space_of("hut_0")
+	var shop: Dictionary = main.interior.space_of("shop_0")
 	_ok(interior.can_sleep and not shop.can_sleep, "床/商店睡觉功能不变")
 	for space in [interior, shop]:
 		var furniture: Array = space.node.find_children("AssetVisual*", "Node3D", true, false)
-		_ok(furniture.size() >= 7 if installed else furniture.is_empty(), space.kind + "家具和木结构替换")
+		_ok(furniture.size() >= 5 if installed else furniture.is_empty(), space.kind + "真实房间内的家具替换")
 		_ok(space.node.find_children("*", "StaticBody3D", true, false).size() == 1, space.kind + "家具没有另加碰撞体")
 	main.terrain.apply_season_tint(Color(0.8, 0.9, 1.0), 1.0)
 	var grass: Material = main.terrain.tintables[0]

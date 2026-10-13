@@ -1,240 +1,180 @@
 extends Node3D
 class_name InteriorSystem
-## 可进入建筑的室内空间：懒加载生成 + 传送 + 过场
-##
-## 【为什么是"同场景隔离区"而不是切场景】
-## 户外世界是程序化生成的，已采集资源、玩家建造物、动物血量、昼夜时间、农场状态
-## 全都挂在同一个场景树上。真切一次场景就得把这一整包状态搬来搬去，
-## 任何一处漏搬都会变成"进屋再出来，树又长回来了"这类玄学 bug。
-## 所以室内就是同一个场景里的一块飞地：几何建在远离地图的坐标上，
-## 玩家只是被传送过去，世界照常运转，存档逻辑一行都不用改。
-##
-## 【为什么飞地要抬到 y=40】
-## 玩家的水下判定是 cam.global_position.y < water_level(0.0)。相机在玩家后方
-## cam_dist 处，抬头（pitch 最大 0.55）时相机会沉到玩家脚下约 cam_dist*0.52 米；
-## 滚轮还能把 cam_dist 拉到 22。室内地面若压在 0 附近，抬头俯角一大就会
-## 误判成"相机入水"，HUD 立刻糊一层蓝。抬到 40 米后最坏情况相机仍在 28 米，
-## 永远够不到水面，这条判定在室内自然失效，不用到处加 if。
-
-# —— 飞地布局 ——
-## 飞地起点与间隔。地形网格只有 ±130，玩家活动被 clamp 在 ±112，
-## 900 起步意味着"离地图至少 770 米"：再远也看不见，再近就可能从窗口望到小镇。
-const SECTOR_ORIGIN := Vector2(900.0, 900.0)
-const SECTOR_STRIDE := 600.0
-## 室内地面高度（见文件头说明）
-const FLOOR_Y := 40.0
+## 室内家具在实际建筑里生成。出入只更新环境状态，不传送、不切场景、不冻结运动。
+## 门洞与可转动门板来自同一建筑规格，碰撞和可见模型共享铰链。
 const Assets := preload("res://scripts/optional_assets.gd")
-
-## 进门判定半径：玩家到门中心的距离小于它就认为"站在门口"。
-## 【下限是被杂货铺卡出来的】门在中心外 3.3 米，而玩家被避让圆顶在 6.02 米外
-## （collide_radius 5.6 + 0.42），正对门站着时离门还有 2.72 米；
-## 判定半径必须比 2.72 大才按得出提示。取 3.8：侧面绕行时距离约 4.8 米，
-## 不会走到屋子侧面就弹出"进入"。
-const DOOR_REACH := 3.8
-## 玩家必须在门的正面半空间里：屋后绕过来的距离本来就超，但侧面擦过时
-## 距离可能刚好卡在阈值内，加一个朝向判断把这种情况排除掉。
-const DOOR_FACE_DOT := -0.4
-
-# —— 过场 ——
+const DOOR_REACH := 1.8
+# 95度给门框留余量；每秒360度，使一扇门约0.26秒打开，跑向门口时仍能及时通过。
+const DOOR_OPEN_ANGLE := 1.658063
+const DOOR_SPEED := 6.283185
 const FADE_OUT := 0.16
 const FADE_IN := 0.28
-## 过场层的 canvas layer：暂停菜单 40、触控 20、HUD 10，遮罩必须压在所有 UI 之上，
-## 否则"变黑的只有 3D 画面，按钮还亮着"，看着像卡死。
 const FADE_LAYER := 60
-
-## 每种可进入建筑的规格。
-## door_z：门外沿到房屋中心的水平距离，必须与 props.gd 里模型的门位置对齐
-##          （hut 门板在 d*0.5+0.05 = 2.15、台阶在 2.45；shop 门板在 3.05；
-##           tent 门帘在 2.45）。给得比模型稍微外扩一点，交互点落在台阶前。
-## exit_pad：出门后站位相对门再往外推的距离，必须大于该建筑的避让半径
-##           （hut 3.82 / shop 6.02 / tent 3.12），否则一出门就被碰撞圆顶开。
 const SPEC := {
-	"hut": {
-		"title": "铁皮小屋", "shape": "box",
-		"w": 7.6, "d": 6.6, "h": 2.9,
-		"door_z": 2.6, "exit_pad": 2.2, "door_w": 1.4, "door_h": 2.1,
-	},
-	"shop": {
-		"title": "杂货铺", "shape": "box",
-		"w": 11.0, "d": 8.0, "h": 3.4,
-		"door_z": 3.3, "exit_pad": 3.4, "door_w": 1.6, "door_h": 2.3,
-	},
-	"tent": {
-		"title": "帐篷", "shape": "round",
-		"r": 3.3, "h": 2.4,
-		"door_z": 2.7, "exit_pad": 1.8, "door_w": 1.3, "door_h": 1.9,
-	},
+	"hut": {"title": "木顶小屋", "shape": "box", "w": 7.6, "d": 6.6, "h": 3.2,
+		"door_z": 3.3, "exit_pad": 1.45, "door_w": 1.8, "door_h": 2.5},
+	"shop": {"title": "杂货铺", "shape": "box", "w": 11.0, "d": 8.0, "h": 3.6,
+		"door_z": 4.0, "exit_pad": 1.45, "door_w": 2.2, "door_h": 2.7},
+	"tent": {"title": "帐篷", "shape": "round", "r": 2.5, "h": 2.3,
+		"door_z": 2.5, "exit_pad": 1.45, "door_w": 1.6, "door_h": 2.1},
 }
-
-var _spaces: Dictionary = {}     # id -> {node, center, floor_y, spawn, half, colliders, kind, title}
-var _slot := 0                   # 已分配飞地数量，用来给新 id 排位置
-var _shown: String = ""          # 当前显示的室内 id
-var busy := false                # 过场进行中，拒绝重复触发
-
+var _spaces: Dictionary = {}
+var busy := false # 仅睡觉推进时间使用淡出；走门不经过此状态。
 var _fade_layer: CanvasLayer
 var _fade: ColorRect
+var _player: Node3D
 
+func _ready() -> void: _build_fade()
 
-func _ready() -> void:
-	_build_fade()
-
-
-# ——————————————— 规格查询（main 在建世界时调用） ———————————————
-static func is_enterable(kind: String) -> bool:
-	return SPEC.has(kind)
-
-
-static func spec_of(kind: String) -> Dictionary:
-	return SPEC.get(kind, {})
-
-
-## 门的世界坐标（xz 平面 + 地形高度由调用方决定，这里只给水平位置与朝向）。
-## 【为什么门的朝向直接用 +Z 旋转后的向量】所有可进入建筑的门都做在模型局部 +Z 侧
-## （props.gd 里门板/台阶/门帘的 z 全是正的），_place 时只转了 rotation.y，
-## 所以门的方向恒为 (sin(rot), cos(rot))，不需要为每种建筑记一套。
-static func door_dir(rot: float) -> Vector2:
-	return Vector2(sin(rot), cos(rot))
-
-
+static func is_enterable(kind: String) -> bool: return SPEC.has(kind)
+static func spec_of(kind: String) -> Dictionary: return SPEC.get(kind, {})
+static func door_dir(rot: float) -> Vector2: return Vector2(sin(rot), cos(rot))
 static func door_point(center2: Vector2, rot: float, kind: String) -> Vector2:
-	var sp: Dictionary = spec_of(kind)
-	return center2 + door_dir(rot) * float(sp.get("door_z", 2.6))
-
-
-## 出门后的落脚点：门外再推 exit_pad，保证不会卡进房屋的避让圆里
+	return center2 + door_dir(rot) * float(spec_of(kind).get("door_z", 3.3))
 static func exit_point(center2: Vector2, rot: float, kind: String) -> Vector2:
-	var sp: Dictionary = spec_of(kind)
-	return center2 + door_dir(rot) * (float(sp.get("door_z", 2.6)) + float(sp.get("exit_pad", 2.0)))
+	var spec: Dictionary = spec_of(kind)
+	return door_point(center2, rot, kind) + door_dir(rot) * float(spec.get("exit_pad", 1.45))
+static func at_door(pos: Vector3, center2: Vector2, rot: float, kind: String) -> bool:
+	var offset := Vector2(pos.x, pos.z) - door_point(center2, rot, kind)
+	var side := Vector2(cos(rot), -sin(rot))
+	return offset.length() < DOOR_REACH and absf(offset.dot(side)) < float(spec_of(kind).get("door_w", 1.8)) * 0.5 + 0.3
 
-
-## 玩家是否够得着这扇门
-static func at_door(player_pos: Vector3, center2: Vector2, rot: float, kind: String) -> bool:
-	var dp := door_point(center2, rot, kind)
-	var to := Vector2(player_pos.x - dp.x, player_pos.z - dp.y)
-	if to.length() > DOOR_REACH:
-		return false
-	# 站在门的两侧/背面不该触发：门的法线朝外，玩家在门前方时投影为正
-	return to.dot(door_dir(rot)) > DOOR_FACE_DOT * 3.0
-
-
-# ——————————————— 空间（懒加载） ———————————————
-## 取（或首次生成）某个建筑的室内，返回给 main 用于传送的落点信息。
-## 生成只发生在第一次进入：小镇有 4 座房子 + 玩家可能造一堆帐篷，
-## 开局就全建出来纯属浪费，而且玩家可能一局都不进去。
-func ensure(id: String, kind: String, seed_val: int) -> Dictionary:
-	if _spaces.has(id):
-		return _spaces[id]
-	var sp: Dictionary = spec_of(kind)
-	if sp.is_empty():
-		return {}
-
+func register(id: String, kind: String, seed_val: int, house: Node3D) -> Dictionary:
+	if _spaces.has(id): return _spaces[id]
+	var spec: Dictionary = spec_of(kind)
+	var room := Node3D.new()
+	room.name = "RoomContents"
+	room.position.y = float(house.get_meta("floor_height", 0.18))
+	room.set_meta("camera_obstacle", true)
+	house.add_child(room)
 	var rng := RandomNumberGenerator.new()
-	# 室内摆设跟着"地图种子 + 建筑 id"走：同一个存档进去看到的永远是同一间屋子，
-	# 而不是每次进门家具换个位置。
 	rng.seed = absi(seed_val * 31 + hash(id)) % 2147483000
-
-	var center := SECTOR_ORIGIN + Vector2(float(_slot % 8) * SECTOR_STRIDE,
-		float(_slot / 8) * SECTOR_STRIDE)
-	_slot += 1
-
-	var root := Node3D.new()
-	root.name = "Interior_%s" % id
-	root.position = Vector3(center.x, FLOOR_Y, center.y)
-
-	var half := Vector2(float(sp.get("w", 7.6)) * 0.5 - 0.75, float(sp.get("d", 6.6)) * 0.5 - 0.75)
-	var spawn := Vector3(0.0, 0.0, 0.0)
 	var cols: Array = []
-
-	# 床（或睡袋）的局部坐标由各个构建函数返回，而不是在别处再抄一份——
-	# main 靠它判断"玩家是不是站在床边"，抄一份就迟早会和家具实际位置对不上。
 	var bed := Vector3.ZERO
-	var can_sleep := false
-
-	if str(sp.get("shape", "box")) == "round":
-		var r: float = float(sp.get("r", 3.3))
-		half = Vector2(r - 0.7, r - 0.7)
-		bed = _build_tent(root, r, float(sp.get("h", 2.4)), rng)
-		can_sleep = true
-		# 出生点要同时满足两件事：
-		#   1) 不能太靠后——相机在玩家身后约 2.8，帐篷半径只有 3.3，
-		#      往后多挪半米相机就顶到布墙、视野被自己的后背糊满；
-		#   2) 不能贴着睡袋——睡袋在 (-r*0.45, -0.6) 一带，进门就落在它的
-		#      睡觉判定圈里的话，第一下按 F 是"睡觉"而不是"出门"，人会被困在帐篷里。
-		# (0.35, 0.3) 到睡袋约 2.04 米，离后墙还有 0.2 米余量，两边都够。
-		spawn = Vector3(0.35, 0.0, 0.3)
-		cols.append({"pos": center + Vector2(0.0, -r * 0.35), "r": 0.9})
+	if kind == "tent":
+		bed = _build_tent(room, float(spec.r), float(spec.h), rng, false)
+	elif kind == "shop":
+		_build_shop(room, float(spec.w), float(spec.d), float(spec.h), {}, rng, Vector2.ZERO, cols, false)
 	else:
-		var w: float = float(sp.get("w", 7.6))
-		var d: float = float(sp.get("d", 6.6))
-		var h: float = float(sp.get("h", 2.9))
-		var hole := {"at": 0.0, "w": float(sp.get("door_w", 1.4)), "y0": 0.0, "y1": float(sp.get("door_h", 2.1))}
-		match kind:
-			"shop":
-				# 铺子里没有床，睡不了
-				_build_shop(root, w, d, h, hole, rng, center, cols)
-			_:
-				bed = _build_hut(root, w, d, h, hole, rng, center, cols)
-				can_sleep = true
-		# 必须把出生点推到屋子深处，让身后的相机离门墙 > cam_dist，
-		# 否则第三人称直接穿到 +Z 墙外——屏幕里只剩一坨门板和远处的草坪。
-		# 相机在玩家身后（+Z 侧）约 2.8，hut d/2=3.3、shop d/2=4，spawn.z=-1.2 都够安全。
-		spawn = Vector3(0.0, 0.0, -1.2)
-
-	# 实体移动不会再按固定 floor_y 贴地，室内地板、墙面和家具也必须有碰撞。
-	preload("res://scripts/world_collision.gd").attach(root)
-	add_child(root)
-	# 家具避让圆在构建时就已换算成世界 xz（玩家只认世界坐标），
-	# 这里不再叠加飞地偏移——否则避让圆会整体飘到屋子外面去。
-
-	var space := {
-		"id": id,
-		"kind": kind,
-		"title": str(sp.get("title", "屋子")),
-		"node": root,
-		"center": center,
-		"floor_y": FLOOR_Y,
-		"half": half,
-		"spawn": root.position + spawn,
-		# 进门后朝向屋子深处：yaw=0 时相机看向 -Z，而门在 +Z 墙，正好背对门。
-		"spawn_yaw": 0.0,
-		"colliders": cols,
-		# 床的世界坐标 + 这间屋子能不能睡。main 用它做"靠近床边按 F"的判定。
-		"bed": root.position + bed,
-		"can_sleep": can_sleep,
-	}
+		bed = _build_hut(room, float(spec.w), float(spec.d), float(spec.h), {}, rng, Vector2.ZERO, cols, false)
+	preload("res://scripts/world_collision.gd").attach(room)
+	var pivot: Node3D = house.get_node_or_null("DoorPivot")
+	var door := AnimatableBody3D.new()
+	door.name = "DoorSolid"
+	door.collision_layer = 17
+	door.collision_mask = 6
+	# 每个物理帧由主控推进铰链，避免同时使用 Tween 和物理同步互相覆盖。
+	door.sync_to_physics = false
+	door.position = pivot.position
+	house.add_child(door)
+	pivot.reparent(door, false)
+	pivot.position = Vector3.ZERO
+	var collision := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(float(spec.door_w), float(spec.door_h), 0.10)
+	collision.shape = box
+	collision.position = Vector3(float(spec.door_w) * 0.5, float(spec.door_h) * 0.5, 0)
+	door.add_child(collision)
+	var center3: Vector3 = room.global_position
+	var half := Vector2(float(spec.get("w", float(spec.get("r", 2.5)) * 2.0)), float(spec.get("d", float(spec.get("r", 2.5)) * 2.0))) * 0.5
+	var space := {"id": id, "kind": kind, "title": spec.title, "node": room, "frame": house,
+		"center": Vector2(center3.x, center3.z), "floor_y": center3.y, "half": half,
+		"spawn": room.to_global(Vector3(0, 0.03, 0)), "colliders": [],
+		"bed": room.to_global(bed), "can_sleep": kind != "shop", "door": door, "open": false}
 	_spaces[id] = space
 	return space
 
+func ensure(id: String, _kind: String, _seed: int) -> Dictionary: return space_of(id)
+func space_of(id: String) -> Dictionary: return _spaces.get(id, {})
+func forget(id: String) -> void: _spaces.erase(id)
 
-func space_of(id: String) -> Dictionary:
-	return _spaces.get(id, {})
+func covers_ground(point: Vector2, margin := 0.25) -> bool:
+	for space: Dictionary in _spaces.values():
+		if not is_instance_valid(space.frame): continue
+		if _covers(space.frame, str(space.kind), point, margin): return true
+	return false
 
+static func _covers(frame: Node3D, kind: String, point: Vector2, margin: float) -> bool:
+	var local := frame.to_local(Vector3(point.x, frame.global_position.y, point.y))
+	var spec: Dictionary = spec_of(kind)
+	if kind == "tent": return Vector2(local.x, local.z).length() < float(spec.r) + margin
+	return absf(local.x) < float(spec.w) * 0.5 + margin and absf(local.z) < float(spec.d) * 0.5 + margin
 
-## 只显示当前所在的那间。
-## 【为什么其它飞地要藏起来】每间屋子都带 2~3 盏 OmniLight，飞地之间隔 600 米
-## 但它们仍在同一个渲染场景里，灯光与网格照样进剔除和光照计算。
-## 藏掉不可见的那些，等于把"玩家造了 20 个帐篷"的代价压回常数级。
-func show_only(id: String) -> void:
-	_shown = id
-	for k in _spaces.keys():
-		var s: Dictionary = _spaces[k]
-		var n: Node3D = s.get("node", null)
-		if n != null and is_instance_valid(n):
-			n.visible = (k == id)
+func clear_groundcover(world: Node3D, frame: Node3D, kind: String) -> void:
+	# 玩家自建帐篷时清掉既有地被；headless 的 Dummy 后端不能读回真实变换，禁止误删。
+	if DisplayServer.get_name() == "headless": return
+	for instance in world.find_children("*", "MultiMeshInstance3D", true, false):
+		var mm: MultiMesh = instance.multimesh
+		var kept: Array[Transform3D] = []
+		for index in mm.instance_count:
+			var transform := mm.get_instance_transform(index)
+			var point: Vector3 = instance.global_transform * transform.origin
+			if point.y < -100 or not _covers(frame, kind, Vector2(point.x, point.z), 0.3): kept.append(transform)
+		if kept.size() == mm.instance_count: continue
+		mm.instance_count = kept.size()
+		for index in kept.size(): mm.set_instance_transform(index, kept[index])
 
+func space_at(pos: Vector3) -> Dictionary:
+	for space: Dictionary in _spaces.values():
+		var house: Node3D = space.frame
+		if not is_instance_valid(house): continue
+		var local := house.to_local(pos)
+		var spec: Dictionary = spec_of(space.kind)
+		if local.y < float(house.get_meta("floor_height", 0.18)) - 0.12 or local.y > float(spec.h): continue
+		var inside: bool
+		if space.kind == "tent":
+			inside = Vector2(local.x, local.z).length() < float(spec.r) - 0.12
+		else:
+			inside = absf(local.x) < float(spec.w) * 0.5 - 0.12 and absf(local.z) < float(spec.d) * 0.5 - 0.12
+		if inside: return space
+	return {}
 
-func hide_all() -> void:
-	_shown = ""
-	for k in _spaces.keys():
-		var n: Node3D = _spaces[k].get("node", null)
-		if n != null and is_instance_valid(n):
-			n.visible = false
+func near_door(id: String, pos: Vector3) -> bool:
+	var space := space_of(id)
+	if space.is_empty(): return false
+	var local: Vector3 = space.frame.to_local(pos)
+	var spec: Dictionary = spec_of(space.kind)
+	var offset := Vector2(local.x, local.z - float(spec.door_z))
+	return absf(local.x) < float(spec.door_w) * 0.5 + 0.3 and offset.length() < DOOR_REACH and local.y > -0.3 and local.y < float(spec.door_h) + 0.3
 
+func set_open(id: String, value: bool) -> bool:
+	var space := space_of(id)
+	if space.is_empty(): return false
+	if not value and is_instance_valid(_player):
+		var local: Vector3 = space.frame.to_local(_player.global_position)
+		var spec: Dictionary = spec_of(space.kind)
+		# 门扇扫过的矩形加胶囊半径；有人站在其中时拒绝关门，不能夹住或把人顶出墙。
+		if absf(local.x) < float(spec.door_w) * 0.5 + 0.42 and local.z < float(spec.door_z) + 0.45 and local.z > float(spec.door_z) - float(spec.door_w) - 0.45:
+			return false
+	space.open = value
+	return true
+
+func tick_doors(player: Node3D, dt: float) -> void:
+	_player = player
+	for space: Dictionary in _spaces.values():
+		var house: Node3D = space.frame
+		if not is_instance_valid(house): continue
+		var local := house.to_local(player.global_position)
+		var spec: Dictionary = spec_of(space.kind)
+		var offset := local.z - float(spec.door_z)
+		var velocity: Vector3 = house.global_basis.inverse() * player.velocity
+		# 只在门前真正向门推进时推开；路过旁边或静止站门口不会自动开门。
+		if absf(local.x) < float(spec.door_w) * 0.5 - 0.25 and absf(offset) < 1.0 and local.y < float(spec.door_h) and velocity.z * signf(offset) < -0.05:
+			space.open = true
+		space.door.rotation.y = move_toward(space.door.rotation.y, DOOR_OPEN_ANGLE if space.open else 0.0, DOOR_SPEED * dt)
+
+func serialize_doors() -> Dictionary:
+	var states := {}
+	for id in _spaces: states[id] = bool(_spaces[id].open)
+	return states
+func restore_doors(states: Variant) -> void:
+	for id in _spaces:
+		var open: bool = states is Dictionary and bool(states.get(id, false))
+		_spaces[id].open = open
+		_spaces[id].door.rotation.y = DOOR_OPEN_ANGLE if open else 0.0
 
 # ——————————————— 过场 ———————————————
-## 淡出 → 执行 mid（传送 / 建屋子）→ 淡入。
-## 不做真正的"读条"：屋子是几毫秒就能拼出来的原始几何，
-## 但瞬移没有过渡会让玩家搞不清自己是怎么到的屋里，所以留一个短黑场当标点。
+## 淡出后推进睡觉时间再淡入；出入建筑不得调用此方法。
 func warp(mid: Callable) -> void:
 	if busy:
 		return
@@ -404,7 +344,7 @@ static func _lamp(pos: Vector3, energy := 1.6, range_m := 8.0) -> OmniLight3D:
 # ——————————————— 铁皮小屋室内 ———————————————
 ## 返回床的局部坐标（玩家睡觉的交互点）
 static func _build_hut(root: Node3D, w: float, d: float, h: float, hole: Dictionary,
-		rng: RandomNumberGenerator, center: Vector2, cols: Array) -> Vector3:
+		rng: RandomNumberGenerator, center: Vector2, cols: Array, shell := true) -> Vector3:
 	var floor_m := _mat(Color(0.52, 0.36, 0.24))
 	floor_m.set_meta("surface_kind", "wood")
 	var wall_m := _mat(Color(0.88, 0.84, 0.74))
@@ -414,35 +354,36 @@ static func _build_hut(root: Node3D, w: float, d: float, h: float, hole: Diction
 	wood_l.set_meta("surface_kind", "wood")
 	var iron := _mat(Color(0.36, 0.36, 0.38), 0.7)
 
-	root.add_child(_box(Vector3(w, 0.24, d), floor_m, Vector3(0, -0.12, 0)))
-	root.add_child(_box(Vector3(w, 0.24, d), _mat(Color(0.74, 0.70, 0.62)), Vector3(0, h + 0.12, 0)))
+	if shell:
+		root.add_child(_box(Vector3(w, 0.24, d), floor_m, Vector3(0, -0.12, 0)))
+		root.add_child(_box(Vector3(w, 0.24, d), _mat(Color(0.74, 0.70, 0.62)), Vector3(0, h + 0.12, 0)))
 
-	# 门在 +Z 墙（与室外模型一致：玩家从 +Z 方向进来）
-	var door_w: float = float(hole.get("w", 1.4))
-	var door_h: float = float(hole.get("y1", 2.1))
-	var wp := _wall(w, h, 0.28, true, hole, wall_m)
-	wp.position.z = d * 0.5
-	root.add_child(wp)
-	# 门框 + 门板。门板是关着的：门洞外是飞地之外的虚空（只有雾），
-	# 留一个通透的洞会让玩家看见"门外什么都没有"，很出戏。
-	root.add_child(_box(Vector3(door_w + 0.3, door_h + 0.12, 0.34), wood,
-		Vector3(0, (door_h + 0.12) * 0.5, d * 0.5)))
-	root.add_child(_box(Vector3(door_w - 0.08, door_h - 0.08, 0.10), wood_l,
-		Vector3(0, door_h * 0.5, d * 0.5)))
+		# 门在 +Z 墙（与室外模型一致：玩家从 +Z 方向进来）
+		var door_w: float = float(hole.get("w", 1.4))
+		var door_h: float = float(hole.get("y1", 2.1))
+		var wp := _wall(w, h, 0.28, true, hole, wall_m)
+		wp.position.z = d * 0.5
+		root.add_child(wp)
+		# 完整壳体模式仅用于独立家具预览；正式房屋传shell=false，不重复生成外墙与门。
+		# 正式门洞与活动门由外部建筑提供。
+		root.add_child(_box(Vector3(door_w + 0.3, door_h + 0.12, 0.34), wood,
+			Vector3(0, (door_h + 0.12) * 0.5, d * 0.5)))
+		root.add_child(_box(Vector3(door_w - 0.08, door_h - 0.08, 0.10), wood_l,
+			Vector3(0, door_h * 0.5, d * 0.5)))
 
-	var wz := _wall(w, h, 0.28, true, {}, wall_m)
-	wz.position.z = -d * 0.5
-	root.add_child(wz)
+		var wz := _wall(w, h, 0.28, true, {}, wall_m)
+		wz.position.z = -d * 0.5
+		root.add_child(wz)
 
-	var win_hole := {"at": 0.0, "w": 1.8, "y0": 1.05, "y1": 2.05}
-	for s in [-1.0, 1.0]:
-		var wx := _wall(d, h, 0.28, false, win_hole, wall_m)
-		wx.position.x = s * w * 0.5
-		root.add_child(wx)
-		root.add_child(_window(false, 0.0, 1.8, 1.05, 2.05,
-			Vector3(s * w * 0.5, 0.0, 0.0), Vector3(-s * 1.0, 0.0, 0.0)))
+		var win_hole := {"at": 0.0, "w": 1.8, "y0": 1.05, "y1": 2.05}
+		for s in [-1.0, 1.0]:
+			var wx := _wall(d, h, 0.28, false, win_hole, wall_m)
+			wx.position.x = s * w * 0.5
+			root.add_child(wx)
+			root.add_child(_window(false, 0.0, 1.8, 1.05, 2.05,
+				Vector3(s * w * 0.5, 0.0, 0.0), Vector3(-s * 1.0, 0.0, 0.0)))
 
-	# —— 家具 ——
+		# —— 家具 ——
 	# 床：靠 -X 墙
 	var bed := Node3D.new()
 	bed.position = Vector3(-w * 0.5 + 1.5, 0.0, -d * 0.5 + 1.7)
@@ -525,7 +466,7 @@ static func _build_hut(root: Node3D, w: float, d: float, h: float, hole: Diction
 
 # ——————————————— 杂货铺室内 ———————————————
 static func _build_shop(root: Node3D, w: float, d: float, h: float, hole: Dictionary,
-		rng: RandomNumberGenerator, center: Vector2, cols: Array) -> void:
+		rng: RandomNumberGenerator, center: Vector2, cols: Array, shell := true) -> void:
 	var floor_m := _mat(Color(0.58, 0.44, 0.30))
 	floor_m.set_meta("surface_kind", "wood")
 	var wall_m := _mat(Color(0.90, 0.86, 0.76))
@@ -534,46 +475,47 @@ static func _build_shop(root: Node3D, w: float, d: float, h: float, hole: Dictio
 	var wood_l := _mat(Color(0.70, 0.53, 0.35))
 	wood_l.set_meta("surface_kind", "wood")
 
-	root.add_child(_box(Vector3(w, 0.24, d), floor_m, Vector3(0, -0.12, 0)))
-	root.add_child(_box(Vector3(w, 0.24, d), _mat(Color(0.76, 0.72, 0.64)), Vector3(0, h + 0.12, 0)))
+	if shell:
+		root.add_child(_box(Vector3(w, 0.24, d), floor_m, Vector3(0, -0.12, 0)))
+		root.add_child(_box(Vector3(w, 0.24, d), _mat(Color(0.76, 0.72, 0.64)), Vector3(0, h + 0.12, 0)))
 
-	var door_w: float = float(hole.get("w", 1.6))
-	var door_h: float = float(hole.get("y1", 2.3))
-	var wp := _wall(w, h, 0.3, true, hole, wall_m)
-	wp.position.z = d * 0.5
-	root.add_child(wp)
-	root.add_child(_box(Vector3(door_w + 0.4, door_h + 0.14, 0.36), wood,
-		Vector3(0, (door_h + 0.14) * 0.5, d * 0.5)))
-	root.add_child(_box(Vector3(door_w - 0.10, door_h - 0.08, 0.10), wood_l,
-		Vector3(0, door_h * 0.5, d * 0.5)))
+		var door_w: float = float(hole.get("w", 1.6))
+		var door_h: float = float(hole.get("y1", 2.3))
+		var wp := _wall(w, h, 0.3, true, hole, wall_m)
+		wp.position.z = d * 0.5
+		root.add_child(wp)
+		root.add_child(_box(Vector3(door_w + 0.4, door_h + 0.14, 0.36), wood,
+			Vector3(0, (door_h + 0.14) * 0.5, d * 0.5)))
+		root.add_child(_box(Vector3(door_w - 0.10, door_h - 0.08, 0.10), wood_l,
+			Vector3(0, door_h * 0.5, d * 0.5)))
 
-	var wz := _wall(w, h, 0.3, true, {}, wall_m)
-	wz.position.z = -d * 0.5
-	root.add_child(wz)
+		var wz := _wall(w, h, 0.3, true, {}, wall_m)
+		wz.position.z = -d * 0.5
+		root.add_child(wz)
 
-	# 两侧各两个高窗。_wall 一次只支持一个洞，两个洞就手工切成三段墙柱 + 两段窗肚。
-	for s in [-1.0, 1.0]:
-		var hw: float = 0.8
-		var a0 := -d * 0.22
-		var a1 := d * 0.22
-		var wy0 := 1.5
-		var wy1 := 2.6
-		var wx := Node3D.new()
-		wx.position.x = s * w * 0.5
-		for sg in [[-d * 0.5, a0 - hw], [a0 + hw, a1 - hw], [a1 + hw, d * 0.5]]:
-			var p := _piece(false, float(sg[0]), float(sg[1]), 0.0, h, 0.3, wall_m)
-			if p != null:
-				wx.add_child(p)
-		for at in [a0, a1]:
-			for pr in [[wy1, h], [0.0, wy0]]:
-				var q := _piece(false, at - hw, at + hw, float(pr[0]), float(pr[1]), 0.3, wall_m)
-				if q != null:
-					wx.add_child(q)
-			wx.add_child(_window(false, at, 1.6, wy0, wy1,
-				Vector3(0.0, 0.0, 0.0), Vector3(-s * 1.2, 0.0, 0.0)))
-		root.add_child(wx)
+		# 两侧各两个高窗。_wall 一次只支持一个洞，两个洞就手工切成三段墙柱 + 两段窗肚。
+		for s in [-1.0, 1.0]:
+			var hw: float = 0.8
+			var a0 := -d * 0.22
+			var a1 := d * 0.22
+			var wy0 := 1.5
+			var wy1 := 2.6
+			var wx := Node3D.new()
+			wx.position.x = s * w * 0.5
+			for sg in [[-d * 0.5, a0 - hw], [a0 + hw, a1 - hw], [a1 + hw, d * 0.5]]:
+				var p := _piece(false, float(sg[0]), float(sg[1]), 0.0, h, 0.3, wall_m)
+				if p != null:
+					wx.add_child(p)
+			for at in [a0, a1]:
+				for pr in [[wy1, h], [0.0, wy0]]:
+					var q := _piece(false, at - hw, at + hw, float(pr[0]), float(pr[1]), 0.3, wall_m)
+					if q != null:
+						wx.add_child(q)
+				wx.add_child(_window(false, at, 1.6, wy0, wy1,
+					Vector3(0.0, 0.0, 0.0), Vector3(-s * 1.2, 0.0, 0.0)))
+			root.add_child(wx)
 
-	# —— 柜台 ——
+		# —— 柜台 ——
 	var cz := -d * 0.5 + 1.8
 	root.add_child(_box(Vector3(4.6, 1.05, 0.75), wood, Vector3(-1.2, 0.52, cz)))
 	root.add_child(_box(Vector3(4.8, 0.10, 0.92), wood_l, Vector3(-1.2, 1.09, cz)))
@@ -633,34 +575,35 @@ static func _build_shop(root: Node3D, w: float, d: float, h: float, hole: Dictio
 
 # ——————————————— 帐篷室内 ———————————————
 ## 返回睡袋的局部坐标（帐篷里睡觉的交互点）
-static func _build_tent(root: Node3D, r: float, h: float, rng: RandomNumberGenerator) -> Vector3:
+static func _build_tent(root: Node3D, r: float, h: float, rng: RandomNumberGenerator, shell := true) -> Vector3:
 	var canvas := _mat(Color(0.86, 0.80, 0.65))
 	var wood := _mat(Color(0.46, 0.31, 0.20))
 	wood.set_meta("surface_kind", "wood")
 
-	root.add_child(_cyl(r, 0.2, _mat(Color(0.60, 0.52, 0.38)), Vector3(0, -0.1, 0), 12))
+	if shell:
+		root.add_child(_cyl(r, 0.2, _mat(Color(0.60, 0.52, 0.38)), Vector3(0, -0.1, 0), 12))
 
-	# 侧壁：关掉上下盖，只留一圈布
-	var wall := CylinderMesh.new()
-	wall.top_radius = r
-	wall.bottom_radius = r
-	wall.height = h
-	wall.radial_segments = 12
-	wall.rings = 1
-	wall.cap_top = false
-	wall.cap_bottom = false
-	root.add_child(_mi(wall, canvas, Vector3(0, h * 0.5, 0)))
+		# 侧壁：关掉上下盖，只留一圈布
+		var wall := CylinderMesh.new()
+		wall.top_radius = r
+		wall.bottom_radius = r
+		wall.height = h
+		wall.radial_segments = 12
+		wall.rings = 1
+		wall.cap_top = false
+		wall.cap_bottom = false
+		root.add_child(_mi(wall, canvas, Vector3(0, h * 0.5, 0)))
 
-	# 锥顶
-	var cone := CylinderMesh.new()
-	cone.bottom_radius = r
-	cone.top_radius = 0.0
-	cone.height = 1.5
-	cone.radial_segments = 12
-	cone.rings = 1
-	root.add_child(_mi(cone, canvas, Vector3(0, h + 0.75, 0)))
+		# 锥顶
+		var cone := CylinderMesh.new()
+		cone.bottom_radius = r
+		cone.top_radius = 0.0
+		cone.height = 1.5
+		cone.radial_segments = 12
+		cone.rings = 1
+		root.add_child(_mi(cone, canvas, Vector3(0, h + 0.75, 0)))
 
-	# 睡袋 + 木箱 + 小灯
+		# 睡袋 + 木箱 + 小灯
 	root.add_child(_box(Vector3(1.1, 0.24, 2.2), _mat(Color(0.42, 0.50, 0.40)), Vector3(-r * 0.45, 0.12, -0.6)))
 	root.add_child(_box(Vector3(0.8, 0.16, 0.45), _mat(Color(0.88, 0.86, 0.78)), Vector3(-r * 0.45, 0.30, -1.5)))
 	var crate := _box(Vector3(0.78, 0.62, 0.78), wood, Vector3(r * 0.5, 0.31, -0.9))

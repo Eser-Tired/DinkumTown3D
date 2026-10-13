@@ -27,8 +27,8 @@ func _initialize() -> void:
 					var image: Image = resource.get_image()
 					failed = failed or image == null or image.is_empty()
 					textures += 1
-	# 当前119场景的147个贴图表面已逐个验过；漏材质时不能靠其它表面凑到下限蒙混过关。
-	failed = failed or scenes != 119 or textures != 19 or textured_surfaces != 147
+	# 真门洞、地板和独立门扇增加8个表面；逐一验证图像后仍要求精确数量，不能蒙混白模。
+	failed = failed or scenes != 119 or textures != 19 or textured_surfaces != 155
 	failed = failed or not preload("res://scripts/optional_assets.gd").DIRECTORY.begins_with("res://assets/")
 	print("==== DELIVERY CHECK DONE scenes=%d textures=%d textured_surfaces=%d failed=%s ====" % [scenes, textures, textured_surfaces, failed])
 	quit(1 if failed else 0)

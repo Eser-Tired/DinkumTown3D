@@ -20,6 +20,7 @@ static var _mats := {}
 static var _meshes := {}
 const Surfaces := preload("res://scripts/materials.gd")
 const Assets := preload("res://scripts/optional_assets.gd")
+const Rooms := preload("res://scripts/interior.gd")
 
 
 static func mat(color: Color, rough := 0.92, metal := 0.0) -> StandardMaterial3D:
@@ -107,99 +108,87 @@ static func _roof(w: float, d: float, h: float, m: Material, pos := Vector3.ZERO
 # ——————————————— 帐篷 ———————————————
 static func make_tent() -> Node3D:
 	var root := Node3D.new()
-	root.add_child(_cone(2.5, 2.6, surface("canvas", C_CANVAS), Vector3(0, 2.3, 0), Vector3.ZERO, 8))
-
-	var wall := CylinderMesh.new()
-	wall.top_radius = 2.5
-	wall.bottom_radius = 2.5
-	wall.height = 1.0
-	wall.radial_segments = 8
-	root.add_child(_mi(wall, surface("canvas", C_CANVAS), Vector3(0, 0.5, 0)))
-
-	root.add_child(_box(Vector3(1.1, 1.7, 0.10), mat(Color(0.35, 0.26, 0.19)), Vector3(0, 0.85, 2.45)))
-	root.add_child(_cyl(0.08, 4.2, surface("wood", C_WOOD_DARK), Vector3(0, 2.1, 0)))
-	for i in 4:
-		var a := TAU * float(i) / 4.0 + PI * 0.25
-		root.add_child(_cyl(0.05, 1.4, surface("wood", C_WOOD_DARK),
-			Vector3(cos(a) * 2.9, 0.5, sin(a) * 2.9), Vector3(0, 0, cos(a) * 0.35)))
+	var spec: Dictionary = Rooms.spec_of("tent")
+	var r := float(spec.r)
+	var h := float(spec.h)
+	var door_w := float(spec.door_w)
+	var door_h := float(spec.door_h)
+	var floor_y := 0.18
+	var wall := surface("canvas", C_CANVAS)
+	root.add_child(_cyl(r, floor_y, surface("wood", C_WOOD), Vector3(0, floor_y * 0.5, 0), Vector3.ZERO, 24))
+	var roof := Node3D.new()
+	roof.name = "Roof"
+	roof.add_child(_cone(r + 0.08, 1.5, wall, Vector3(0, floor_y + h + 0.75, 0), Vector3.ZERO, 24))
+	root.add_child(roof)
+	var width := 2.0 * r * sin(PI / 24.0)
+	for i in 24:
+		var angle := TAU * float(i) / 24.0
+		var point := Vector3(sin(angle) * r, floor_y + h * 0.5, cos(angle) * r)
+		# 用分段布墙留出前方门洞，整圆筒或整体凸包都会堵住可行走的内部。
+		if point.z > 0 and absf(point.x) < door_w * 0.5 + width * 0.5: continue
+		root.add_child(_box(Vector3(width + 0.03, h, 0.10), wall, point, Vector3(0, angle, 0)))
+	_door_metadata(root, Vector3(r * 2.0, h, r * 2.0), door_w, door_h)
+	var pivot: Node3D = root.get_node("DoorPivot")
+	pivot.add_child(_box(Vector3(door_w, door_h, 0.08), wall, Vector3(door_w * 0.5, door_h * 0.5, 0)))
 	root.set_meta("collide_radius", 2.7)
 	return root
 
+static func _door_metadata(root: Node3D, room_size: Vector3, width: float, height: float) -> void:
+	root.set_meta("room_size", room_size)
+	root.set_meta("floor_height", 0.18)
+	root.set_meta("door_width", width)
+	root.set_meta("door_height", height)
+	root.set_meta("camera_obstacle", true)
+	root.set_meta("entrance_origin", Vector2.ZERO)
+	root.set_meta("stair_x", 0.0)
+	root.set_meta("exit_distance", room_size.z * 0.5 + 1.45)
+	var pivot := Node3D.new()
+	pivot.name = "DoorPivot"
+	pivot.position = Vector3(-width * 0.5, 0.18, room_size.z * 0.5)
+	pivot.set_meta("visual_only", true)
+	root.add_child(pivot)
 
-# ——————————————— 铁皮顶木屋 ———————————————
+static func _walkable_house(shop: bool, roof_color: Color) -> Node3D:
+	var root := Node3D.new()
+	var spec: Dictionary = Rooms.spec_of("shop" if shop else "hut")
+	var size := Vector3(float(spec.w), float(spec.h), float(spec.d))
+	var door_w := float(spec.door_w)
+	var door_h := float(spec.door_h)
+	var wall := surface("plaster", C_WALL)
+	var wood := surface("wood", C_WOOD_DARK)
+	root.add_child(_box(Vector3(size.x, 0.18, size.z), wood, Vector3(0, 0.09, 0)))
+	for side in [-1.0, 1.0]:
+		root.add_child(_box(Vector3(0.18, size.y, size.z), wall, Vector3(float(side) * size.x * 0.5, size.y * 0.5, 0)))
+		var width := (size.x - door_w) * 0.5
+		root.add_child(_box(Vector3(width, size.y, 0.18), wall, Vector3(float(side) * (door_w * 0.5 + width * 0.5), size.y * 0.5, size.z * 0.5)))
+	root.add_child(_box(Vector3(size.x, size.y, 0.18), wall, Vector3(0, size.y * 0.5, -size.z * 0.5)))
+	var lintel := size.y - door_h - 0.18
+	root.add_child(_box(Vector3(door_w, lintel, 0.18), wall, Vector3(0, size.y - lintel * 0.5, size.z * 0.5)))
+	var roof := Node3D.new()
+	roof.name = "Roof"
+	roof.add_child(_roof(size.x + 0.65, size.z + 0.7, 1.65, surface("iron", roof_color, 0.48), Vector3(0, size.y + 0.825, 0)))
+	root.add_child(roof)
+	_door_metadata(root, size, door_w, door_h)
+	root.get_node("DoorPivot").add_child(_box(Vector3(door_w, door_h, 0.10), wood, Vector3(door_w * 0.5, door_h * 0.5, 0)))
+	root.set_meta("collide_radius", Vector2(size.x, size.z).length() * 0.5 + 0.25)
+	return root
+
+# ——————————————— 可直接走入的房屋 ———————————————
 static func make_hut(roof_col := C_IRON_RED) -> Node3D:
 	var model := Assets.instantiate("hut")
-	if model != null:
-		return model
-	var root := Node3D.new()
-	var w := 5.0
-	var d := 4.2
-	var h := 2.6
+	return model if model != null else _walkable_house(false, roof_col)
 
-	root.add_child(_box(Vector3(w, h, d), surface("plaster", C_WALL), Vector3(0, h * 0.5, 0)))
-	# 木框立柱
-	for sx in [-1.0, 1.0]:
-		for sz in [-1.0, 1.0]:
-			root.add_child(_box(Vector3(0.28, h, 0.28), surface("wood", C_WOOD_DARK),
-				Vector3(sx * (w * 0.5 - 0.14), h * 0.5, sz * (d * 0.5 - 0.14))))
-	# 屋顶（带屋檐）
-	var roof := _roof(w + 1.4, d + 1.4, 1.7, surface("iron", roof_col, 0.48), Vector3(0, h + 0.85, 0))
-	root.add_child(roof)
-	# 门与窗
-	root.add_child(_box(Vector3(1.0, 1.8, 0.12), surface("wood", C_WOOD_DARK), Vector3(0, 0.9, d * 0.5 + 0.05)))
-	root.add_child(_box(Vector3(1.1, 0.9, 0.10), mat(Color(0.55, 0.72, 0.78, 1.0), 0.25), Vector3(-1.6, 1.7, d * 0.5 + 0.04)))
-	root.add_child(_box(Vector3(1.1, 0.9, 0.10), mat(Color(0.55, 0.72, 0.78, 1.0), 0.25), Vector3(1.6, 1.7, d * 0.5 + 0.04)))
-	# 门前小台阶
-	root.add_child(_box(Vector3(1.6, 0.18, 0.7), surface("wood", C_WOOD), Vector3(0, 0.09, d * 0.5 + 0.35)))
-	root.set_meta("collide_radius", 3.4)
-	return root
-
-
-# ——————————————— 杂货铺 / 商店 ———————————————
 static func make_shop() -> Node3D:
 	var model := Assets.instantiate("shop")
-	if model != null:
-		# 商店仍有独立招牌，避免放大同款房屋后失去用途辨识。
-		var sign := Label3D.new()
-		sign.text = "杂货铺"
-		sign.font_size = 64
-		sign.pixel_size = 0.016
-		sign.position = Vector3(0, 3.4, 2.75)
-		model.add_child(sign)
-		return model
-	var root := Node3D.new()
-	var w := 8.0
-	var d := 6.0
-	var h := 3.2
-
-	root.add_child(_box(Vector3(w, h, d), mat(Color(0.88, 0.82, 0.68)), Vector3(0, h * 0.5, 0)))
-	root.add_child(_roof(w + 1.6, d + 1.6, 1.9, surface("iron", C_IRON_GREEN, 0.48), Vector3(0, h + 0.95, 0)))
-
-	# 门廊
-	var porch_y := h + 0.2
-	for sx in [-1.0, 0.0, 1.0]:
-		root.add_child(_cyl(0.14, 2.6, surface("wood", C_WOOD_DARK), Vector3(sx * 3.0, 1.3, d * 0.5 + 1.4)))
-	root.add_child(_box(Vector3(9.0, 0.22, 3.2), surface("wood", C_WOOD), Vector3(0, 2.75, d * 0.5 + 1.4)))
-	root.add_child(_roof(9.4, 3.6, 0.9, surface("iron", C_IRON_GREEN, 0.48), Vector3(0, 3.35, d * 0.5 + 1.4)))
-
-	# 橱窗与门
-	root.add_child(_box(Vector3(2.4, 1.6, 0.12), mat(Color(0.55, 0.72, 0.78, 1.0), 0.25), Vector3(-2.2, 1.6, d * 0.5 + 0.05)))
-	root.add_child(_box(Vector3(1.2, 2.1, 0.14), surface("wood", C_WOOD_DARK), Vector3(1.4, 1.05, d * 0.5 + 0.05)))
-
-	# 招牌
-	root.add_child(_box(Vector3(4.2, 1.0, 0.14), mat(Color(0.42, 0.24, 0.16)), Vector3(0, h + 2.0, d * 0.5 + 0.1)))
-	var flag := Node3D.new()
-	flag.position = Vector3(4.2, h + 3.6, d * 0.5)
-	flag.add_child(_cyl(0.07, 2.4, surface("wood", C_WOOD_DARK), Vector3(0, 1.2, 0)))
-	flag.add_child(_box(Vector3(1.4, 0.9, 0.06), mat(Color(0.85, 0.62, 0.18)), Vector3(0.7, 2.0, 0)))
-	flag.set_meta("spin", 0.35)
-	root.add_child(flag)
-
-	# 门口货箱
-	root.add_child(_box(Vector3(0.9, 0.9, 0.9), surface("wood", C_WOOD_LIGHT), Vector3(-3.4, 0.45, d * 0.5 + 1.0)))
-	root.add_child(_box(Vector3(0.9, 0.9, 0.9), surface("wood", C_WOOD_LIGHT), Vector3(-3.4, 1.35, d * 0.5 + 1.0)))
-	root.set_meta("collide_radius", 5.6)
-	return root
+	if model == null: model = _walkable_house(true, C_IRON_GREEN)
+	var size: Vector3 = model.get_meta("room_size", Vector3(11, 3.6, 8))
+	var sign := Label3D.new()
+	sign.text = "杂货铺"
+	sign.font_size = 64
+	sign.pixel_size = 0.016
+	sign.position = Vector3(0, size.y + 0.32, size.z * 0.5 + 0.15)
+	model.add_child(sign)
+	return model
 
 
 # ——————————————— 码头 / 木栈桥 ———————————————
