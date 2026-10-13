@@ -5,6 +5,10 @@
 两部分：**怎么和这位用户协作**，以及**这个项目的具体约定**。
 每一条都来自实际踩过的坑，或者用户明确提过的要求——不是通用的 best practice 合集。
 
+偏好与标准整合日期：**2026-10-13（Asia/Shanghai）**。用户在当前任务中的明确指令优先于本文；
+已确认的偏好可跨任务沿用，讨论中的备选方案不能写成用户已经决定的要求。
+版本号、模块数量、素材数量和发布状态以当前代码及验收记录为准，不凭历史文档推断。
+
 ---
 
 ## 一、和这位用户怎么协作
@@ -32,16 +36,24 @@
 |---|---|
 | 客观事实（代码怎么跑、数值多少） | **自己查清楚**再说话，不猜 |
 | 用户意图（要什么效果、范围到哪、多种方案怎么取舍） | **拿不准就尽早问**，别猜一个闷头做 |
-| 不可逆 / 对外的操作（推送、发布） | 先确认再动 |
+| 常规实现、可逆修复、读取与验证 | 在已授权范围内自主完成，做到可审查、可验证 |
+| 推送与发布 | 按已有授权执行；常规任务提交并推送已获授权，不重复询问。新发布或其他未授权的对外操作，先完成可审查结果，再请求确认 |
 
 提问要**带上自己的倾向和理由**，让对方做「确认或纠正」，而不是从零决策。
 猜错方向的代价远高于多问一句。
+
+- 澄清要尽早提出，同时继续不依赖答案的工作。必要答案没有到达时，不能把等待时长当作同意。
+- 用户中途补充通常是在调整当前任务，应保留原目标，吸收纠正后继续；只有明确取消或替换目标才停止原任务。
+- 用户说「可以，开始」「直接修改」就是执行指令。不要停在方案、能力介绍或反复问「要不要继续」。
+- 遇到权限、工具或规范限制，指出具体限制及来源，先寻找安全可行的完成方式；不能把局部失败包装为整体完成。
 
 ### 交付质量
 
 - 不要只汇报「我改好了」。**改完必须跑验证、给证据**：测试输出、截图、具体数字。
 - 有失败项就明确说失败，不粉饰、不把「随手试了一下能跑」说成「已修复」。
 - 涉及取舍时把取舍讲明白，别替用户做完决定还瞒着他。
+- 工具执行前交代要做什么；持续工作时保持简短进展，说明已确认的事实与下一步，不重复播报无变化状态。
+- 最终答复必须独立完整：先结果，再列关键改动、验证和未验证部分；文件给可点击链接，GitHub 同步给提交或发布链接。
 
 ### 讲解专业 / 数理问题
 
@@ -50,6 +62,7 @@
 - 复杂主题拆成多张小图，图与图之间穿插文字。不要堆一张密不透风的大图。
 - **公式必须真实排版（KaTeX），禁止用代码块承载公式。**
 - 图表配色跟随当前 IDE 主题（深色主题用深底浅字）。
+- 图要服务解释；简单事实或一行修复不用为了配图扩展成大报告。
 
 ### 回答形态
 
@@ -80,22 +93,33 @@
 - 用户给的需求边界就是边界。**超出范围的想法先说出来，不要默默做进去。**
 - 如果发现「不做 A 就修不好 B」，把这个依赖讲清楚，让用户决定做不做 A。
 - 宁可先做完确定的部分，再回头问不确定的部分，也不要一次吞下所有猜测。
+- 常规、可逆且实现需求所必需的调整，在授权范围内直接推进；新增玩法、明显改变操作手感或扩大交付范围，要说明取舍并核对意图。
+- 保留已有用户改动。提交前检查工作区，不能为了通过测试清空用户文件或覆盖真实存档。
+
+### Python 环境
+
+- 运行 Python 相关项目或素材处理工具，优先查找并使用合适的 **Conda 环境**；根据实际运行需要管理依赖。
+- 临时创建的测试 Conda 环境，测试结束后及时删除；不删除用户原有环境。
+- 素材制作工具可使用独立环境，不因此给游戏运行时引入 Python 或 addons 依赖。
 
 ### Git
 
 - commit message 用中文，讲清**为什么**这么改，末尾列验证结果。
-- 推送前确认自检全绿。
-- 新增的截图 / 日志目录要加进 `.gitignore`。
+- 推送前完成与改动范围匹配的检查，相关自检必须全绿；无法验证的范围明确写出。
+- 临时截图 / 日志目录要加进 `.gitignore`；用于交付证据的精选截图归档到 `docs/shots/` 或 `docs/screenshots/` 并跟踪。
+- 游戏所需的代码、模型、骨骼动画、材质、贴图和许可声明都要同步 GitHub；缓存、个人存档和签名秘密不入库。安装包通过 Release 附件交付。
 - **每完成一个任务就提交并推送**（用户要求：进度随时同步到 GitHub）。
-  流程：跑完验收自检 → `git add -A` → 中文 commit → `git push` → 用
-  `git rev-parse origin/main` 与 `git rev-parse HEAD` 比对确认真的推上去了。
+  流程：检查工作区及远端 → 完成适用验收 → 审查 diff 与待提交文件 → `git add -A` → 中文 commit → `git push` → 用
+  `git rev-parse origin/main` 与 `git rev-parse HEAD` 比对确认真的推上去了（当前分支为 `main` 时）。
+  其他分支与实际推送的远端分支比对；遇到远端更新先审查并整合，不能默认强制推送。
   推送放后台跑（见第七节：前台可能被超时掐掉，且退出码会被管道吃掉）。
 
 ---
 
 ## 三、项目现状
 
-**DinkumTown3D** —— Godot 4.7.2 / GDScript / **零外部依赖（不装 addons）**。
+**DinkumTown3D** —— Godot 4.7.2 / GDScript / **运行时不依赖外部工具，不装 addons**。
+允许使用可合法分发的第三方静态美术资源，以及独立的离线制作工具。
 第三人称澳洲内陆小镇游戏：采集、建造、农耕、狩猎、昼夜与季节、水域（游泳/潜水）。
 地形程序化生成，整张地图由 `map_seed` 派生。
 
@@ -104,9 +128,11 @@
 ```
 project.godot
 scenes/       场景（main / main_menu 等）
-scripts/      全部逻辑，24 个模块
+scripts/      全部游戏逻辑
+assets/       随仓库交付的模型、动画、材质、贴图与许可
 tools/        自检脚本（*_check）与截图脚本（*_shot）
 docs/         文档
+site/         项目介绍页（不打入游戏运行包）
 build/        导出产物（发布时作为 release 附件）
 启动游戏.bat / 启动游戏_调试.bat    手动启动用
 ```
@@ -117,7 +143,7 @@ build/        导出产物（发布时作为 release 附件）
 |---|---|
 | `main.gd` | 游戏主控：建世界、输入分发、动作路由、存档序列化 |
 | `terrain.gd` | 地形与水域的**唯一真值**：`height_at` / `water_depth_at` / `water_surface_at` |
-| `player.gd` | 玩家：移动、跳跃、游泳潜水、战斗、程序化动画 |
+| `player.gd` / `rigged_visual.gd` | 玩家运动与战斗 / 骨骼动画、待机恢复和按实际位移同步步频 |
 | `game_bus.gd` | autoload，全局信号与跨模块状态（`ui_blocking`、`touch_*`、`terrain_seed`） |
 | `save_system.gd` | 存档读写，元数据在 `__meta`（含地图种子） |
 | `hud.gd` | 界面：资源、时钟、季节、提示、建造菜单、憋气条、水下遮罩 |
@@ -126,42 +152,72 @@ build/        导出产物（发布时作为 release 附件）
 | `settings_panel.gd` / `save_slots_panel.gd` | 主界面与暂停菜单**共用**的设置与存档面板 |
 | `day_night.gd` / `season.gd` | 昼夜循环 / 季节与天气 |
 | `flora.gd` / `props.gd` | 植被建模 / 道具建模（按种子） |
-| `huntable.gd` / `critter.gd` / `kangaroo.gd` / `emu.gd` | 可狩猎动物基类 / 游走 AI / 具体物种 |
+| `huntable.gd` / `critter.gd` / `wildlife.gd` | 可狩猎动物基类 / 游走 AI / 当前鹿、雄鹿与狐狸；旧物种脚本用于回退 |
+| `ui_layout.gd` | 字体粗细、字号与面板随分辨率自适应，供各界面共用 |
+| `nature_assets.gd` / `vegetation_scatter.gd` / `optional_assets.gd` | 自然资产目录 / 植被散布 / 房屋与道具资产目录 |
+| `physics_prop.gd` / `world_collision.gd` / `interior.gd` | 道具物理 / 世界碰撞 / 室内与进出房屋 |
 | `farm.gd` / `inventory_ui.gd` / `weapons.gd` / `audio.gd` | 农田 / 背包 / 武器表 / 音效 |
 
 ---
 
 ## 四、怎么跑
 
-```bash
-GODOT="C:/Users/a2402/Documents/Code/Tools/Godot/Godot_v4.7.2-stable_win64.exe"
-cd "C:/Users/a2402/Documents/Code/DinkumTown3D"
+从项目根目录使用 PowerShell。先确认实际引擎版本，优先使用控制台版获取完整日志；
+不要沿用其他机器的用户名或临时引擎路径。
+涉及存档的自检先准备包含当前待测代码及完整 `assets/` 的独立验证副本，
+把副本的 `application/config/name` 改为唯一测试名称，避免读写真实游戏存档。
+下面的 `$verifyPath` 必须指向已准备好的副本。
+
+```powershell
+$godotPath = (Resolve-Path '../Tools/Godot/Godot.exe').Path # 可替换为本机 4.7.2 控制台版
+$verifyPath = 'C:/temp/DinkumTown3D-verify'
+& $godotPath --version
+& $godotPath --headless --editor --path $verifyPath --quit
 
 # —— 逻辑自检（headless 可用）——
-"$GODOT" --headless --path . --scene res://tools/combat_check.tscn --quit-after 400
-"$GODOT" --headless --path . --scene res://tools/e2e.tscn          --quit-after 400
-"$GODOT" --headless --path . --scene res://tools/water_check.tscn  --quit-after 4000
+& $godotPath --headless --path $verifyPath --scene res://tools/combat_check.tscn --fixed-fps 60 --quit-after 4000
+& $godotPath --headless --path $verifyPath --scene res://tools/e2e.tscn --fixed-fps 60 --quit-after 4000
+& $godotPath --headless --path $verifyPath --scene res://tools/water_check.tscn --fixed-fps 60 --quit-after 4000
 
 # —— 触控布局（8 种分辨率逐个跑）——
-"$GODOT" --headless --path . --scene res://tools/touch_layout_check.tscn \
-         --quit-after 200 -- --size 1440x810
+$sizes = '1440x810','1280x720','1920x1080','2560x1440','720x1280','810x1440','1080x1920','1440x2560'
+foreach ($size in $sizes) {
+    & $godotPath --headless --path $verifyPath --scene res://tools/touch_layout_check.tscn --quit-after 200 -- --size $size
+}
 
 # —— 截图：必须【窗口模式】——
 # headless 下 RenderingServer.frame_post_draw 不发，脚本会永久卡在 await 上
-"$GODOT" --path . --scene res://tools/water_shot.tscn --quit-after 8000 \
-         -- --size 1600x900 --dir res://water_shots/
-"$GODOT" --path . --scene res://scenes/main_menu.tscn --auto-shot \
-         --shot-dir res://menu_shots/ --quit-after 2500
+& $godotPath --path $verifyPath --scene res://tools/water_shot.tscn --quit-after 8000 -- --size 1600x900 --dir res://water_shots/
+# 主菜单脚本不会自动创建截图目录；运行前先创建。
+New-Item -ItemType Directory -Force (Join-Path $verifyPath 'menu_shots') | Out-Null
+& $godotPath --path $verifyPath --scene res://scenes/main_menu.tscn --auto-shot --shot-dir res://menu_shots/ --quit-after 2500
 ```
+
+`--quit-after` 是卡住时的兜底，不能把被截断的执行算作通过；必须看到自检的完成标记与零失败结果。
+Windows GUI 版不能可靠输出控制台日志时，用 `--log-file`、脚本日志或控制台版核对结果。
 
 ### 验收标准
 
-改完必须满足，缺一不可：
+涉及游戏运行、布局、素材或导出行为的改动，必须满足：
 
 1. `combat_check` / `e2e` / `water_check` **全绿**。有 fails 就必须修，不能说「不影响」。
 2. 触控布局在 8 种分辨率下 `bad=0`。
 3. **有视觉改动就要有截图**，并且自己看过一眼再汇报。
 4. 新增可验证的行为，就补对应的断言。
+
+按改动补充专项检查：
+
+| 改动 | 额外验证 |
+|---|---|
+| 界面与触控 | `ui_check`，检查真实粗体、字号、裁切、重叠，以及界面打开后旋转分辨率 |
+| 人物或动物 | `motion_check`，截图或逐帧观察待机、走跑循环、转弯与停步；换模型不能只验静态外观 |
+| 碰撞、家具或室内 | `physics_check` / `interior_check` / 对应道具专项检查，覆盖实际运动与进出房屋 |
+| 模型、材质或植被 | `delivery_check.gd`、`art_dependencies.gd`；植被用窗口模式的 `nature_check`，不能在 headless 读回 MultiMesh 变换 |
+| 安装包 | `release_check.gd`、窗口模式 `release_smoke.gd`、实际 EXE 启动及 APK 签名检查 |
+
+纯文档或规范改动，核对事实、引用文件、示例命令及 `git diff --check` 即可；不把未运行的游戏测试写成已通过。
+游戏自检失败必须修复；引擎警告与失败断言区分记录，遗留警告照实报告，不宣称「无警告」。
+通过后只因新改动、新失败或未解决疑点追加验证，避免无理由重复整套测试。
 
 ---
 
@@ -171,6 +227,7 @@ cd "C:/Users/a2402/Documents/Code/DinkumTown3D"
 - **踩过的坑要写进注释。** 这是本仓库的风格：注释的主要作用是防止后人重犯。
 - 常量 / 函数的用途边界要写清楚。阈值、魔法数字必须说明来历。
 - 新增的 UI 要照顾触控：尺寸按分辨率缩放（见 `set_touch_mode` / `set_ui_scale`）。
+- 字体必须实际加粗，字号与控件几何缩放分别处理；优先复用 `ui_layout.gd`，不能只把旧控件整体拉大。位置也要响应视口变化。
 - 自检脚本硬编码期望值时，要意识到**世界是随机的** → 用 `main.forced_map_seed` 锁图。
 - 自检脚本放 `tools/`，命名 `<主题>_check`；截图脚本 `<主题>_shot`。
 
@@ -192,16 +249,48 @@ cd "C:/Users/a2402/Documents/Code/DinkumTown3D"
 | 水面做成固定圆盘会和地形脱节（被地形切出硬边 / 悬空在地表之上） | 水面按地形网格逐格生成，四角只要有一角低于水位就盖水 |
 | 地形基准高度一变，所有 `height_at < 0.9` 式的魔法阈值集体失效 | 「是不是水」永远跟水位比，不跟绝对高度比 |
 | 读档要在建世界**之前**拿到种子，但 main 模块数据那时还没反序列化 | 种子走存档 `__meta`，用 `static peek_terrain_seed(slot)` 预读 |
+| 骨骼动画省略常量通道，停步时会残留上一动画的脚部姿势 | 补齐缺失的位移、旋转和缩放通道，并验证走跑 / 攻击后回到待机 |
+| 固定播放速度与实际移动不匹配，顶墙仍原地跑；动物缓慢转身却直接朝目标平移 | 步频跟随碰撞后实际位移，步态循环首尾闭合；动物沿身体朝向推进 |
+| 尚未进场景树时 seek / 骨骼全局姿态缓存不能作为可靠采样 | 离线测量直接插值动画通道并沿骨骼父链累计，验证实际采样值 |
+| 资源存在且场景能加载，也可能是坏材质引用造成的白模 | 检查实际材质与贴图图像，并用干净检出和运行包验证完整依赖；不要盲目捆绑已有外部资源 |
+| Mobile 渲染器沿用桌面 SSAO 开关会触发不支持效果的警告 | 按实际渲染器能力启用效果；桌面 Mobile 预览与安卓设备测试分别记录 |
+| 改版本号却仍上传旧导出产物 | 同步项目、安卓版本及 release 检查脚本的期望版本，再重新导出并核对包内版本 |
 
 ---
 
 ## 七、环境备忘
 
-- 项目固定在 `C:\Users\a2402\Documents\Code\` 下。
-- Windows + Git Bash。Bash 环境**可能缺 coreutils**（`mkdir` / `ls` / `which` 不总是可用），需要时改用 PowerShell 或 node。
+- 当前项目目录：`C:\Users\Eser\Documents\Code\DinkumTown3D`。实际操作以任务工作目录为准，不把本机绝对路径写死进运行逻辑。
+- 当前使用 Windows + PowerShell；Git Bash 可用但可能缺 coreutils（`mkdir` / `ls` / `which`），需要时改用 PowerShell。
 - **用 node 中转去 spawn 子进程可能失败（EBUSY）**，连 `cmd.exe` 都起不来。直接在 shell 里调 exe 更可靠。
 - **`git push` 在前台可能被超时掐掉**（凭据桥偶尔很慢）→ 用后台跑。
   判断是否推成功看 `git rev-parse origin/main`，**不要看命令退出码**——走管道时 `$?`
   是管道最后一个命令的，会把真实错误吃掉。
   凭据是否可用可单独测：`git-credential-helper-selector get`（返回空 = 桥断了，等一会儿会自己恢复）。
 - 写 `res://` 下的文件前，目录必须已存在，否则静默失败（见第六节）。
+- Windows 递归删除或移动前，确认解析后的绝对目标是本次创建的临时目录或明确授权的目录；用同一 shell 的原生命令处理路径。
+- 后台构建与推送使用日志记录状态，能隐藏窗口的辅助进程默认隐藏；不要关闭用户原有游戏、编辑器或测试进程。
+
+---
+
+## 八、素材与跨平台交付
+
+### 美术资源
+
+- 用户已允许从不限来源寻找 Godot 可用 3D 素材，并在动物替换中更改或扩充物种。优先选许可明确、可公开分发的资源；新增玩法与存档迁移仍要说明影响。
+- 当前自然、人物、动物使用 Quaternius，房屋、家具与道具使用 Kenney；第三方源素材为 CC0，许可随资产保存。`local_assets/` 中旧 EmacE 已退役，不能重新成为必须手工安装的运行依赖。
+- 替换材质和模型要核对真实比例、朝向、原点、碰撞、交互距离、存档标识与动画；增加植被密度要同时检查分布、贴地、水域边界、性能和种子确定性。
+- 图片转 3D 是可选制作路线。图片生成结果与可运行 3D 资产分开验收：单张图的隐藏面不能保证准确；角色还需拓扑、骨骼、蒙皮与动画。没有产出或尚未接入的工具不能说成已完成。
+- 高精制作素材要准备适合桌面和安卓的运行网格、LOD 与贴图分档；不把更高面数或更大贴图本身当作质量证明。
+- 在上传源素材前检查许可是否允许公开分发；「可用于游戏」不自动等于「可把原始模型公开到 GitHub」。
+
+### Windows / Android / GitHub Release
+
+- 源码与所有合法可分发的运行素材同步仓库；Windows 提供资源内嵌的单文件 EXE，安卓提供签名 APK，完整构建流程见 `tools/build_release.ps1`。
+- 以 `project.godot`、`export_presets.cfg` 及 `release_check.gd` / `release_smoke.gd` 的期望版本核对实际产物；安卓 `version/code` 递增，不能只改 Release 标题。
+- 当前安卓固定包名为 `com.dinkumtown3d.app`，发布沿用固定专属密钥。密钥、密码与签名配置放仓库外并备份，不写进 Git、日志或答复。本机保存位置见 README。
+- v1.0.0 的签名密钥已丢失；从 v1.0.0 升级涉及先卸载及旧存档丢失风险。后续版本延续 v1.1.0 起使用的密钥，覆盖升级须实际核对包名、版本和证书。
+- 运行包排除 `docs/`、`tools/`、`site/` 等非运行内容，保留动态加载的素材与许可。不要仅凭编辑器能运行认定安装包完整。
+- 发布前核对实际包内资源、Windows 独立启动、APK 签名、SHA-256 和源码提交；上传后比对 GitHub 附件摘要，确认 Release 已发布及 tag 指向正确提交。
+- 发布时更新 README 的下载、安装、控制、构建、素材许可与验证范围说明。普通任务的同步不自动意味着要重新打包或发布一个版本。
+- 安卓签名成功、布局断言通过、Windows 上的 Mobile 预览，都不能替代安卓安装、性能和触控实机测试。没有真机或模拟器不可用就明确报告，不宣称已验证手感或帧率。
