@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>小镇 NPC 与杂货铺交易</title>
+<style>
+html[data-theme="dark"]{--bg:#0d141c;--panel:#17222e;--ink:#edf3f8;--muted:#adc0ce;--line:#344657;--accent:#e7ba79}
+html[data-theme="light"]{--bg:#f5f3ee;--panel:#fff;--ink:#1d2c37;--muted:#526475;--line:#d4d9dd;--accent:#88582d}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.7 "Microsoft YaHei",sans-serif}main{max-width:1080px;margin:70px auto;padding:0 24px}h1{font-size:36px;line-height:1.25}h2{margin-top:36px;font-size:23px}p{color:var(--muted)}button{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:10px 16px;cursor:pointer;font:inherit}button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}#theme{position:fixed;right:20px;top:18px;z-index:2}img{width:100%;display:block;border-radius:8px;border:1px solid var(--line)}figure{margin:18px 0}figcaption{color:var(--muted);font-size:15px;margin:8px 0}.controls{display:flex;flex-wrap:wrap;gap:8px}.cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}.portrait{max-width:360px;margin:auto}table{width:100%;border-collapse:collapse;background:var(--panel)}th,td{text-align:left;padding:12px;border-bottom:1px solid var(--line)}.tag{color:var(--accent);font-size:15px}.notice{padding:16px 20px;border-left:3px solid var(--accent);background:var(--panel)}a{color:var(--accent)}@media(max-width:700px){.cards{grid-template-columns:1fr}h1{font-size:28px}th,td{padding:8px;font-size:14px}}
+</style></head><body><button id="theme" type="button">切换主题</button><main>
+<span class="tag">当前源码 · 2026-10-14 · Godot 4.7.2</span><h1>小镇里有人了，也能买卖了</h1>
+<p>1 位商店老板留在真实柜台后，3 位村民在各自家门附近随机停留、转身和散步。靠近按 F 或触控「使用」交谈；门口优先开关门，避免路过的村民抢走进出操作。</p>
+<figure><img src="shots/npc_shopkeeper.png" alt="真实商店中站在柜台后的老板"><figcaption>老板在店内与玩家同一世界空间；柜台前可买卖，不能隔墙或离店下单。</figcaption></figure>
+<h2>步态与实际行走一起变化</h2><div class="controls" id="steps"></div><figure><img id="motion" src="shots/npc_idle.png" alt="村民待机和步行实机截图"><figcaption id="caption"></figcaption></figure>
+<p>上方为实际运行的关键帧截图，非连续视频。使用仓库已有的 Quaternius CC0 人物与动画，通过姓名和衣裤配色区分，皮肤保持原材质。移动沿身体朝向推进；碰撞后实际位移决定播放速度，停下后恢复自然待机。友好 NPC 有胶囊碰撞，不加入狩猎与动物掉落列表。</p>
+<table><thead><tr><th>60 秒物理帧采样</th><th>实际走过距离</th><th>离活动中心最远</th><th>不同米格</th></tr></thead><tbody>
+<tr><td>林叔</td><td>41.94 米</td><td>5.72 米</td><td>42</td></tr><tr><td>阿青</td><td>44.04 米</td><td>6.35 米</td><td>45</td></tr><tr><td>小夏</td><td>43.10 米</td><td>6.47 米</td><td>32</td></tr></tbody></table>
+<p>活动半径上限 7 米，步速 1.25 米/秒。采样覆盖 3600 个物理帧和圆盘内不同位置，未进水、未穿入房屋、未出现侧滑；遇到障碍停步并重新选择目标。独立随机流保留原地图的 191 个采集点及其指纹。</p>
+<figure><img src="shots/npc_dialogue.png" alt="触控使用入口打开村民对话"><figcaption>对话时村民停步，结束后继续散步；简短对话使用较矮的窗口。</figcaption></figure>
+<h2>先卖出收获，再采购资源</h2><p>金币从 0 开始，在交易窗口与背包统计中查看。点击窗口右上的数量按钮切换每次 1 或 10 个。每种库存每天补至至少 20，老板收购到的库存继续保留；缺钱、缺物或缺货会拒绝交易，金币、背包与库存全部保持原值。</p>
+<div class="controls"><button id="batch" type="button">报价：每次 1 个</button></div><table><thead><tr><th>资源</th><th>买入总价</th><th>卖出总价</th></tr></thead><tbody id="prices"></tbody></table>
+<div class="cards"><figure><img src="shots/npc_trade_desktop.png" alt="桌面买卖窗口"><figcaption>实际点击卖出后：木材 25 → 24，金币 0 → 2，店内木材 20 → 21。</figcaption></figure><figure class="portrait"><img src="shots/npc_trade_portrait.png" alt="720乘1280竖屏交易窗口"><figcaption>同一个已打开窗口旋转为竖屏，文字、按钮和位置重新布局。</figcaption></figure></div>
+<h2>存档与验证</h2><p>金币、库存、补货日期、NPC 实际位置、活动目标、停留时间和独立随机状态随存档保存。随机状态用十进制字符串，防止 JSON 丢失 64 位精度。旧存档从零金币和默认库存开始，保留原资源和建造物。</p>
+<table><thead><tr><th>检查</th><th>结果</th></tr></thead><tbody>
+<tr><td>NPC、买卖、真实 JSON 存读档、交易窗口 8 种分辨率</td><td>711 项，fails=0</td></tr>
+<tr><td>战斗 / 水域 / 连续进出 / 物理 / 骨骼动作</td><td>102 / 38 / 198 / 23 / 58 项，fails=0</td></tr>
+<tr><td>端到端存读档</td><td>fails=0</td></tr>
+<tr><td>UI / 房屋道具 / 完整道具 / 植被</td><td>1587 / 34 / 90 / 183 项，fails=0</td></tr>
+<tr><td>8 种分辨率触控布局</td><td>全部 bad=0</td></tr>
+<tr><td>交付资产与外部引用</td><td>119 场景、19 贴图、155 贴图表面、187 依赖，failed=false</td></tr>
+</tbody></table>
+<p class="notice">验证在独立副本中完成，未覆盖个人存档；已查看窗口模式的待机、走路、停步及横竖屏截图。部分自检仍有退出时 ObjectDB 清理警告，未宣称无警告。未重新导出安装包或发布 Release，未做安卓实机性能与触控测试。</p>
+<p><a href="../README.md">返回 README</a> · <a href="seamless_houses.html">连续进出房屋</a></p>
+</main><script>
+const root=document.documentElement;root.dataset.theme=localStorage.getItem('npc-theme')||(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');document.querySelector('#theme').onclick=()=>{root.dataset.theme=root.dataset.theme==='dark'?'light':'dark';localStorage.setItem('npc-theme',root.dataset.theme)};
+const frames=[['待机','npc_idle','静止时为自然待机。'],['迈步 1','npc_walk_0','运行中的骨骼与位移，实际速度约 1.24 米/秒。'],['迈步 2','npc_walk_1','间隔 12 个物理帧，动作随步行周期推进。'],['迈步 3','npc_walk_2','约 1.25 米/秒；按碰撞后的实际速度同步步频。'],['停步','npc_stopped','同一村民停止后恢复待机，脚部姿态不残留。']];function choose(i){document.querySelector('#motion').src='shots/'+frames[i][1]+'.png';document.querySelector('#caption').textContent=frames[i][2];document.querySelectorAll('#steps button').forEach((b,j)=>b.setAttribute('aria-pressed',String(j===i)))}frames.forEach((f,i)=>{const b=document.createElement('button');b.textContent=f[0];b.onclick=()=>choose(i);document.querySelector('#steps').appendChild(b)});choose(0);
+let amount=1;const goods=[['木材',4,2],['石头',4,2],['纤维',3,1],['铁矿石',12,6],['食物',8,4]];function prices(){document.querySelector('#prices').innerHTML=goods.map(g=>`<tr><td>${g[0]}</td><td>${g[1]*amount} 金币</td><td>${g[2]*amount} 金币</td></tr>`).join('');document.querySelector('#batch').textContent=`报价：每次 ${amount} 个`}document.querySelector('#batch').onclick=()=>{amount=amount===1?10:1;prices()};prices();
+</script></body></html>

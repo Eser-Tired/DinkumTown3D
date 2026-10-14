@@ -22,6 +22,8 @@ const InteriorS := preload("res://scripts/interior.gd")
 const SleepS := preload("res://scripts/sleep_panel.gd")
 const CollisionS := preload("res://scripts/world_collision.gd")
 const PhysicsPropS := preload("res://scripts/physics_prop.gd")
+const NPCS := preload("res://scripts/town_npc.gd")
+const TradeS := preload("res://scripts/trade_panel.gd")
 
 const TOWN := Vector2(-14.0, -10.0)
 const LAKE := Vector2(48.0, 22.0)
@@ -81,6 +83,12 @@ var save_sys: SaveSystem
 
 var inv := {"wood": 0, "stone": 0, "fiber": 0, "ore": 0, "food": 0}
 var inv_ui: InventoryUI
+var npcs: Array = []
+var merchant: CharacterBody3D
+var trade_panel: CanvasLayer
+var coins := 0
+var shop_stock := {}
+var shop_stock_day := 1
 var pause_menu: PauseMenu
 ## 可进入建筑登记表。每项 {id, kind, title, pos:Vector2, rot}
 ## id 必须稳定（同一座房子每次开局都算出来同一个），否则室内家具的随机摆设会变。
@@ -150,6 +158,7 @@ func _ready() -> void:
 	player.setup(terrain, colliders, TOWN + Vector2(0.0, 17.0))
 
 	_spawn_critters()
+	_spawn_npcs()
 
 	dn = DayNightS.new()
 	dn.name = "DayNight"
@@ -172,6 +181,11 @@ func _ready() -> void:
 	add_child(inv_ui)
 	inv_ui.setup(_bag_inv, _bag_stat, _bag_equip)
 	inv_ui.closed.connect(_on_bag_closed)
+	trade_panel = TradeS.new()
+	trade_panel.name = "TradePanel"
+	add_child(trade_panel)
+	trade_panel.closed.connect(_release_touch)
+	restock_shop()
 
 	# —— 音效（自己挂到 world 上）——
 	audio = AudioS.new()
@@ -332,7 +346,7 @@ func _on_touch_action(a: String) -> void:
 	# 「使用」在门口 / 屋里就是 F 键那个交互：手机上没有 F，
 	# 与其再加一个按钮挤占本来就紧张的右下角，不如让主键跟着上下文变。
 	# 优先级高于建造落位——站在门口按「使用」去放建筑不是玩家想要的。
-	if a == "use" and (house_id != "" or not _door_target().is_empty()):
+	if a == "use" and (house_id != "" or not _door_target().is_empty() or _npc_target() != null):
 		_do_action("interact")
 		return
 	# 建造模式下「使用」键的语义变成"落位"，与桌面端左键一致
@@ -691,6 +705,13 @@ func _house_title(id: String) -> String:
 ## 门口 F / 使用开关门，床边睡觉；进出必须用实际走动完成。
 func _interact() -> void:
 	if player == null: return
+	var npc := _npc_target()
+	if npc != null:
+		if build_mode:
+			_set_build_mode(false)
+			_refresh_preview()
+		trade_panel.open(self, npc)
+		return
 	if _bed_near():
 		_open_sleep()
 		return
@@ -989,6 +1010,9 @@ func _notification(what: int) -> void:
 ## Esc / 返回键的统一处理：从最内层往外一层层退。
 ## 顺序：暂停菜单子面板 → 暂停菜单 → 背包 → 建造模式 → 都没了才开暂停菜单。
 func _back_requested() -> void:
+	if trade_panel != null and trade_panel.is_open():
+		trade_panel.close()
+		return
 	# 睡觉面板把游戏暂停了，桌面 Esc 会由面板自己接走；
 	# 但 Android 的返回键走 _notification（不受 paused 影响），会到这里，先关它。
 	if sleep_panel != null and sleep_panel.is_open():
@@ -1025,6 +1049,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	# 背包打开时只放行"关背包"和"再按一次背包键"，其余游戏输入一律吞掉。
 	# 否则会出现"点背包里的武器按钮 -> 同一帧鼠标左键也触发一次挥砍"。
+	if trade_panel != null and trade_panel.is_open(): return
 	if inv_ui != null and inv_ui.is_open():
 		if event is InputEventKey and event.pressed and not event.echo:
 			match event.keycode:
@@ -1068,6 +1093,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 ## 所有游戏动作的唯一入口：键盘与触控按钮共用
 func _do_action(a: String) -> void:
+	if trade_panel != null and trade_panel.is_open():
+		if a in ["esc", "pause", "interact"]: trade_panel.close()
+		return
 	match a:
 		"harvest":
 			_harvest()
@@ -1241,6 +1269,7 @@ func _set_build_mode(on: bool) -> void:
 
 # ——————————————— 背包界面 ———————————————
 func _toggle_bag() -> void:
+	if trade_panel != null and trade_panel.is_open(): trade_panel.close()
 	if inv_ui == null:
 		return
 	# 进背包前先退建造模式：两者的"当前手持物"语义会打架
@@ -1267,6 +1296,7 @@ func _release_touch() -> void:
 
 # ——————————————— 暂停菜单 ———————————————
 func _toggle_pause() -> void:
+	if trade_panel != null and trade_panel.is_open(): trade_panel.close()
 	if pause_menu == null:
 		return
 	if pause_menu.is_open():
@@ -1333,8 +1363,8 @@ func _bag_stat() -> String:
 			var h := c as Huntable
 			if h != null and not h.is_dead():
 				alive += 1
-	return "第 %d 天 · 资源合计 %d · 已建造 %d 座 · 已采集 %d 处 · 野外动物 %d 只" % [
-		dn.day_count, total, built_items.size(), harvested_ids.size(), alive]
+	return "金币 %d · 第 %d 天 · 资源合计 %d · 已建造 %d 座 · 已采集 %d 处 · 野外动物 %d 只" % [
+		coins, dn.day_count, total, built_items.size(), harvested_ids.size(), alive]
 
 
 ## 背包里点某把武器 -> 装备（与物品栏走同一套真值）
@@ -1756,6 +1786,9 @@ func _process(dt: float) -> void:
 		var tip := "下潜中" if player.diving else "游泳中"
 		hud.set_prompt("%s · 按住 %s 下潜　松开上浮" % [tip, _hint("[Ctrl]", "「潜」")])
 		hud.set_build("")
+	elif not build_mode and _npc_target() != null:
+		var npc := _npc_target()
+		hud.set_prompt(_hint("[F] ", "点「使用」") + ("买卖 · " if npc.merchant else "交谈 · ") + npc.display_name)
 	elif not build_mode:
 		if house_id != "":
 			if _bed_near():
@@ -1863,6 +1896,7 @@ func _weather_cn(w: String) -> String:
 
 ## 每日自动存档（槽 0）
 func _on_auto_save(_day: int, _season: int) -> void:
+	restock_shop()
 	if save_sys != null:
 		save_sys.save(0)
 
@@ -1900,6 +1934,100 @@ func take_item(kind: String, n: int) -> bool:
 	return true
 
 
+func _spawn_npcs() -> void:
+	var names := ["林叔 · 村民", "阿青 · 村民", "小夏 · 村民"]
+	var colors := [Color(0.7, 0.9, 1), Color(0.7, 1, 0.7), Color(1, 0.72, 0.65)]
+	for house: Dictionary in houses:
+		if house.kind not in ["shop", "hut"]: continue
+		var frame: Node3D = house.node
+		var seller: bool = house.kind == "shop"
+		var index := int(str(house.id).get_slice("_", 1))
+		var spawn: Vector3
+		if seller:
+			spawn = frame.to_global(Vector3(-1.2, 0.21, -3.25))
+		else:
+			var pos2: Vector2 = house.exit_point + InteriorS.door_dir(float(house.rot)) * 1.5
+			spawn = Vector3(pos2.x, terrain.height_at(pos2.x, pos2.y) + 0.03, pos2.y)
+		var npc := NPCS.new()
+		npc.name = "NPC_" + str(house.id)
+		npc.configure(self, "npc_" + str(house.id), "老乔 · 商店老板" if seller else names[index], spawn,
+			float(house.rot), seller, Color(1, 0.88, 0.62) if seller else colors[index])
+		add_child(npc)
+		if not seller:
+			# 门前可能另有灯柱或新建物：实际胶囊查询后找最近的合法点，不能凭圆形包围猜空地。
+			for sample in 145:
+				var angle := sample * 2.399963
+				var point: Vector2 = npc.home + Vector2(cos(angle), sin(angle)) * (sample / 144.0) * NPCS.RADIUS
+				if npc.valid_point(point):
+					npc.position = Vector3(point.x, terrain.height_at(point.x, point.y) + 0.03, point.y)
+					npc.initial_position = npc.position
+					break
+		else: merchant = npc
+		npcs.append(npc)
+
+func can_talk(npc: CharacterBody3D) -> bool:
+	if not is_instance_valid(npc) or player == null or player.swimming: return false
+	var distance: float = player.global_position.distance_to(npc.global_position)
+	if distance > (3.1 if npc.merchant else 2.5): return false
+	# 不隔墙对话，也不能在店外隔着后墙下单；柜台以下的碰撞不遮挡站立视线。
+	var room: Dictionary = interior.space_at(player.global_position)
+	var npc_room: Dictionary = interior.space_at(npc.global_position)
+	if str(room.get("id", "")) != str(npc_room.get("id", "")): return false
+	var ray := PhysicsRayQueryParameters3D.create(player.global_position + Vector3.UP * 1.65,
+		npc.global_position + Vector3.UP * 1.65, 17)
+	return get_world_3d().direct_space_state.intersect_ray(ray).is_empty()
+
+func _npc_target() -> CharacterBody3D:
+	# 门口已有明确的开关门语义；村民路过不能让F突然变成对话，挡住原进出流程。
+	if not _door_target().is_empty(): return null
+	var nearest: CharacterBody3D
+	var distance := INF
+	for npc in npcs:
+		if not can_talk(npc): continue
+		var d: float = player.global_position.distance_to(npc.global_position)
+		if d < distance:
+			nearest = npc
+			distance = d
+	return nearest
+
+func restock_shop() -> void:
+	var day: int = dn.day_count if dn != null else 1
+	for kind in TradeS.GOODS:
+		if not shop_stock.has(kind): shop_stock[kind] = TradeS.DAILY_STOCK
+		elif day != shop_stock_day: shop_stock[kind] = maxi(int(shop_stock[kind]), TradeS.DAILY_STOCK)
+	shop_stock_day = day
+
+func trade(kind: String, buying: bool, quantity: int) -> String:
+	if not TradeS.PRICES.has(kind) or quantity not in [1, 10]: return "交易数量或物品无效"
+	if trade_panel == null or not trade_panel.is_open() or trade_panel.speaker != merchant or not can_talk(merchant): return "请到柜台前与老板交易"
+	restock_shop()
+	var price: int = int(TradeS.PRICES[kind][0 if buying else 1]) * quantity
+	var held := int(inv.get(kind, 0))
+	var stock := int(shop_stock[kind])
+	if buying:
+		if coins < price: return "金币不足，先卖些采集物"
+		if stock < quantity: return "店内库存不足，次日补货"
+		if held > 999999999 - quantity: return "背包数量已到上限"
+	else:
+		if held < quantity: return "持有数量不足"
+		if coins > 999999999 - price or stock > 9999 - quantity: return "店内暂时无法收购更多"
+	# 所有前置条件满足后一次扣账：拒绝的交易必须让金币、背包、库存三者完全不变。
+	coins += -price if buying else price
+	inv[kind] = held + (quantity if buying else -quantity)
+	shop_stock[kind] = stock + (-quantity if buying else quantity)
+	hud.set_resources(inv)
+	return "%s %d 个%s，%s %d 金币" % ["买入" if buying else "卖出", quantity, GameHUD.RES_NAME[kind], "花费" if buying else "获得", price]
+
+func _serialize_npcs() -> Dictionary:
+	var states := {}
+	for npc in npcs: states[npc.npc_id] = npc.snapshot()
+	return states
+
+func _restore_npcs(states: Variant) -> void:
+	for npc in npcs:
+		var data: Variant = states.get(npc.npc_id, {}) if states is Dictionary else {}
+		npc.restore(data if data is Dictionary else {})
+
 func give_item(kind: String, n: int) -> void:
 	inv[kind] = int(inv.get(kind, 0)) + n
 	hud.set_resources(inv)
@@ -1911,6 +2039,10 @@ func serialize() -> Dictionary:
 	# 室内与户外共用世界坐标，保存实际位置和速度，读档后可以仍站在房间里。
 	return {
 		"inv": inv.duplicate(),
+		"coins": coins,
+		"shop_stock": shop_stock.duplicate(),
+		"shop_stock_day": shop_stock_day,
+		"npcs": _serialize_npcs(),
 		"time": dn.time,
 		"day": dn.day_count,
 		"pos": [pp.x, pp.y, pp.z],
@@ -1970,6 +2102,7 @@ func _deserialize_critters(arr: Variant) -> void:
 
 
 func deserialize(d: Dictionary) -> void:
+	if trade_panel != null and trade_panel.is_open(): trade_panel.close()
 	# 先清理旧环境标志，恢复坐标、建筑和门后重新根据位置识别室内。
 	# 此处不移动玩家，也不隐藏实际房间。
 	if house_id != "":
@@ -1983,6 +2116,14 @@ func deserialize(d: Dictionary) -> void:
 
 	dn.day_count = int(d.get("day", 1))
 	dn.time = float(d.get("time", 0.30))
+	# 旧存档没有经济字段：从零金币、默认库存开始，不修改已有资源。
+	coins = clampi(int(d.get("coins", 0)), 0, 999999999)
+	shop_stock.clear()
+	var stock: Variant = d.get("shop_stock", {})
+	for kind in TradeS.GOODS:
+		shop_stock[kind] = clampi(int(stock.get(kind, TradeS.DAILY_STOCK)), 0, 9999) if stock is Dictionary else TradeS.DAILY_STOCK
+	shop_stock_day = int(d.get("shop_stock_day", dn.day_count))
+	restock_shop()
 
 	var p: Variant = d.get("pos", [0.0, 0.0, 0.0])
 	if p is Array and (p as Array).size() >= 3:
@@ -2035,6 +2176,7 @@ func deserialize(d: Dictionary) -> void:
 				_place(nb, bx, bz, brot)
 				_register_house(str(bd.get("kind", "")), Vector2(bx, bz), brot, bi, "", true)
 	interior.restore_doors(d.get("doors", {}))
+	_restore_npcs(d.get("npcs", {}))
 	_sync_house_context()
 	dn.collect_night_lights(self)
 	if season != null:

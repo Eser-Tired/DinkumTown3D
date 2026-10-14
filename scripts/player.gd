@@ -72,7 +72,7 @@ var swing_dur := 0.30
 
 func _ready() -> void:
 	collision_layer = 2
-	collision_mask = 13
+	collision_mask = 45 # 原世界/道具/动物，加友好村民层32，不能穿人。
 	floor_snap_length = 0.32
 	floor_max_angle = deg_to_rad(48.0)
 	var capsule := CapsuleShape3D.new()
@@ -227,6 +227,7 @@ func _build_model() -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if GameBus.ui_blocking: return
 	if event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
 		yaw -= event.relative.x * 0.0055
 		pitch = clampf(pitch - event.relative.y * 0.004, -1.15, 0.55)
@@ -273,6 +274,7 @@ func _physics_process(dt: float) -> void:
 	iz = clampf(iz, -1.0, 1.0)
 	var running := Input.is_key_pressed(KEY_SHIFT) or GameBus.touch_run
 	var dir := Vector3(ix, 0.0, iz)
+	if GameBus.ui_blocking: dir = Vector3.ZERO
 	if dir.length() > 0.01:
 		dir = dir.normalized().rotated(Vector3.UP, yaw)
 
@@ -313,6 +315,7 @@ func _physics_process(dt: float) -> void:
 
 	var jump_pressed := Input.is_key_pressed(KEY_SPACE)
 	var want_jump := (jump_pressed and not _jump_was_pressed) or GameBus.touch_jump_edge
+	if GameBus.ui_blocking: want_jump = false
 	_jump_was_pressed = jump_pressed
 	GameBus.touch_jump_edge = false
 	if swimming:
