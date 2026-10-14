@@ -1,6 +1,7 @@
 extends Control
 class_name SettingsPanel
 const U := preload("res://scripts/ui_layout.gd")
+const SurvivalS := preload("res://scripts/survival.gd")
 ## 设置面板 —— 主界面与游戏内暂停菜单共用同一份
 ##
 ## 【为什么要抽成独立类】设置项要落盘到 user://settings.cfg。两个菜单如果各写一份
@@ -55,6 +56,10 @@ var _vol_slider: HSlider
 var _vol_value: Label
 var _quality_option: OptionButton
 var _fs_check: CheckBox
+var world: Node3D
+var _mode_option: OptionButton
+var _mode_note: Label
+var _mode_label: Label
 
 
 ## 【两个必须一起踩的坑，都别重犯】
@@ -129,6 +134,19 @@ func _build() -> void:
 	_fs_check.toggled.connect(_on_fullscreen)
 	row3.add_child(_fs_check)
 	box.add_child(row3)
+	var mode_row := HBoxContainer.new()
+	mode_row.add_theme_constant_override("separation", 12)
+	_mode_label = _label("新存档模式", 140)
+	mode_row.add_child(_mode_label)
+	_mode_option = OptionButton.new()
+	for value in SurvivalS.MODES: _mode_option.add_item(SurvivalS.name_of(value))
+	_mode_option.custom_minimum_size = BASE_OPTION_W
+	_mode_option.item_selected.connect(_on_mode)
+	mode_row.add_child(_mode_option)
+	box.add_child(mode_row)
+	_mode_note = Label.new()
+	_mode_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(_mode_note)
 
 	_note = Label.new()
 	_note.text = "提示：手机版进入游戏后，左半屏任意处按下都会在该处生成摇杆，\n松手即消失；无需另外调整摇杆位置。"
@@ -205,6 +223,25 @@ func _on_vol(v: float) -> void:
 	_apply_vol()
 	save_settings()
 
+func _on_mode(index: int) -> void:
+	if index < 0 or index >= SurvivalS.MODES.size(): return
+	var value: String = SurvivalS.MODES[index]
+	if is_instance_valid(world) and world.survival != null:
+		if not world.survival.set_mode(value): GameBus.toast.emit("该世界已结束，不能切换模式")
+	else: GameBus.new_game_mode = value
+	_sync_mode()
+
+func _sync_mode() -> void:
+	if _mode_option == null: return
+	var value: String = GameBus.new_game_mode
+	var current: bool = is_instance_valid(world) and world.survival != null
+	if current: value = world.survival.mode
+	_mode_label.text = "当前存档模式" if current else "新存档模式"
+	_mode_option.select(SurvivalS.MODES.find(value))
+	_mode_option.disabled = current and not world.survival.playable()
+	var notes := {"normal": "普通：死亡回到镇上，背包保留。睡觉恢复生命。", "hardcore": "真实：死亡掉落背包资源，世界永久结束，旧槽位也不能复活。", "creative": "创造：免伤，建造和播种不扣资源；切回生存保留原库存。"}
+	_mode_note.text = ("修改即保存当前槽位。" if current else "只影响下一次新游戏，不改变已有存档。") + "\n" + notes[value]
+
 
 func _on_quality(idx: int) -> void:
 	_quality = idx
@@ -264,6 +301,7 @@ func load_settings() -> void:
 
 ## 只把内存里的值刷到控件上，不触发回调（否则会反过来触发保存）
 func _sync_widgets() -> void:
+	_sync_mode()
 	if _vol_slider != null:
 		_vol_slider.set_value_no_signal(_vol_master)
 	if _vol_value != null:
@@ -305,6 +343,11 @@ func set_ui_scale(k: float) -> void:
 		_quality_option.custom_minimum_size = BASE_OPTION_W * k
 		_quality_option.add_theme_font_size_override("font_size", U.text_size(BASE_ROW_FONT, k, 12))
 		_quality_option.get_popup().add_theme_font_size_override("font_size", U.text_size(BASE_ROW_FONT, k))
+	if _mode_option != null:
+		_mode_option.custom_minimum_size = BASE_OPTION_W * k
+		_mode_option.add_theme_font_size_override("font_size", U.text_size(BASE_ROW_FONT, k))
+		_mode_option.get_popup().add_theme_font_size_override("font_size", U.text_size(BASE_ROW_FONT, k))
+	if _mode_note != null: _mode_note.add_theme_font_size_override("font_size", U.text_size(BASE_TIP_FONT, k))
 	if _vol_value != null:
 		_vol_value.add_theme_font_size_override("font_size", U.text_size(BASE_SMALL_FONT, k, 12))
 	if _fs_check != null:

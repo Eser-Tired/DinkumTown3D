@@ -61,6 +61,8 @@ var cam_pitch: Node3D
 var cam: Camera3D
 var model: Node3D
 var rig := preload("res://scripts/rigged_visual.gd").new()
+var survival_ref: Node
+var _fall_speed := 0.0
 
 # —— 战斗（近战）——
 const WeaponsS := preload("res://scripts/weapons.gd")
@@ -247,6 +249,9 @@ func _zoom_camera(amount: float) -> void:
 func _physics_process(dt: float) -> void:
 	if terrain == null:
 		return
+	if survival_ref != null and not survival_ref.playable():
+		velocity = Vector3.ZERO
+		return
 	# —— 触控：视角拖拽 / 双指缩放（读后清零，桌面恒为零值，无副作用）——
 	if GameBus.touch_look != Vector2.ZERO:
 		yaw -= GameBus.touch_look.x * 0.0055
@@ -334,6 +339,9 @@ func _physics_process(dt: float) -> void:
 			_try_step(dir * speed * dt)
 	_push_props(dt)
 	var motion_origin := global_position
+	# 水里、台阶与读档复位不沿用上一段坠落。只累积真实下降速度，不能看落地后的零速度。
+	if swimming or _motion_restored: _fall_speed = 0
+	if not swimming: _fall_speed = maxf(_fall_speed, -velocity.y)
 	move_and_slide()
 	_motion_restored = false
 	# 房屋内外都是地图上的真实空间，墙由物理阻挡；不能用旧矩形 clamp 把门口封死。
@@ -341,6 +349,9 @@ func _physics_process(dt: float) -> void:
 	global_position.z = clampf(global_position.z, -112.0, 112.0)
 	_update_camera(dt)
 	on_ground = is_on_floor() and not swimming
+	if on_ground:
+		if survival_ref != null: survival_ref.land(_fall_speed)
+		_fall_speed = 0
 	jump_v = velocity.y
 	jump_h = maxf(0.0, global_position.y - gy) if not swimming else 0.0
 	_last_physics_pos = global_position

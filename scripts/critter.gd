@@ -19,6 +19,7 @@ var timer := 0.0
 var hop_t := -1.0
 var model: Node3D
 var continuous_gait := false
+var threat_active := false
 
 
 func setup(terr: Node3D, pos2: Vector2, pl: Node3D) -> void:
@@ -42,10 +43,12 @@ func _process(dt: float) -> void:
 	var p := global_position
 	var pp := player_ref.global_position
 	var to_p := Vector2(p.x - pp.x, p.z - pp.z)
-	var fleeing := to_p.length() < flee_dist
+	var fleeing := to_p.length() < flee_dist and not threat_active
 	timer -= dt
 
-	if fleeing:
+	if threat_active:
+		target = Vector2(pp.x, pp.z)
+	elif fleeing:
 		target = Vector2(p.x, p.z) + to_p.normalized() * 20.0
 	elif timer <= 0.0:
 		var a := rng.randf() * TAU
@@ -55,6 +58,8 @@ func _process(dt: float) -> void:
 
 	var interval := hop_interval * (0.62 if fleeing else 1.0)
 	var sp := flee_speed if fleeing else walk_speed
+	# 反击追近速度介于玩家步行1.8与奔跑5.2之间，步行会被追上，奔跑仍可撤离。
+	if threat_active: sp = 2.8
 	var d2 := target - Vector2(p.x, p.z)
 
 	if d2.length() > 0.7:
@@ -90,6 +95,9 @@ func _process(dt: float) -> void:
 	if terrain != null and terrain.has_method("water_depth_at") \
 			and terrain.water_depth_at(p.x, p.z) > 0.0:
 		p = global_position
+	if threat_active and is_inside_tree():
+		var ray := PhysicsRayQueryParameters3D.create(global_position + Vector3.UP * 0.6, p + Vector3.UP * 0.6, 17)
+		if not get_world_3d().direct_space_state.intersect_ray(ray).is_empty(): p = global_position
 	global_position = p
 
 	if hop_t >= 0.0:

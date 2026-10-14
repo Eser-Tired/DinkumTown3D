@@ -41,6 +41,8 @@ build/
 /jump_shots*/
 /npc_shots/
 /npc_shots*/
+/modes_shots/
+/modes_shots*/
 
 # 音效试听导出（tools/audio_shot.gd 的产物）
 /_audio_preview/

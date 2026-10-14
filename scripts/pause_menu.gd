@@ -142,6 +142,7 @@ func _build() -> void:
 	_panels["settings"] = _settings
 
 	if _pending_sv != null:
+		_settings.world = _pending_sv._world
 		_slots.set_save_system(_pending_sv)
 		_pending_sv = null
 
@@ -287,6 +288,7 @@ func _quit() -> void:
 ## 供宿主注入正在使用的存档系统，避免面板自己又造一个实例。
 ## 在 add_child 之前调用也有效：那时 _ready 还没跑，先记下来，_build 里补挂。
 func set_save_system(sv: SaveSystem) -> void:
+	if _settings != null: _settings.world = sv._world
 	if _slots != null:
 		_slots.set_save_system(sv)
 	else:

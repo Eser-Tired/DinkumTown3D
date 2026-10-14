@@ -13,6 +13,10 @@ var help_panel: Panel
 var toast_label: Label
 var weapon_label: Label
 var toast_t := 0.0
+var _mode_name := "普通生存"
+var _health := 100.0
+var _creative := false
+var _resource_cache := {}
 var _touch_mode := false
 var _layout_args := Vector4.ZERO
 var _last_bottom := -1.0
@@ -398,14 +402,22 @@ func show_help_panel(on: bool) -> void:
 
 
 func set_resources(res: Dictionary) -> void:
+	_resource_cache = res.duplicate()
 	var t := ""
 	for k in ["wood", "stone", "fiber", "ore", "food"]:
-		t += "%s  %d\n" % [RES_NAME[k], int(res.get(k, 0))]
+		t += "%s  %s\n" % [RES_NAME[k], "∞" if _creative else str(int(res.get(k, 0)))]
+	t += "%s\n生命 %.0f/100" % [_mode_name, _health]
 	t = t.trim_suffix("\n")
 	if res_label.text == t:
 		return
 	res_label.text = t
 	_refresh_layout()
+
+func set_survival_status(mode_name: String, health: float, creative: bool) -> void:
+	_mode_name = mode_name
+	_health = health
+	_creative = creative
+	set_resources(_resource_cache)
 
 
 func set_clock(day: int, clock: String, speed: float) -> void:

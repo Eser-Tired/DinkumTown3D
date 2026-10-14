@@ -24,6 +24,7 @@ const CollisionS := preload("res://scripts/world_collision.gd")
 const PhysicsPropS := preload("res://scripts/physics_prop.gd")
 const NPCS := preload("res://scripts/town_npc.gd")
 const TradeS := preload("res://scripts/trade_panel.gd")
+const SurvivalS := preload("res://scripts/survival.gd")
 
 const TOWN := Vector2(-14.0, -10.0)
 const LAKE := Vector2(48.0, 22.0)
@@ -89,6 +90,7 @@ var trade_panel: CanvasLayer
 var coins := 0
 var shop_stock := {}
 var shop_stock_day := 1
+var survival: Node
 var pause_menu: PauseMenu
 ## 可进入建筑登记表。每项 {id, kind, title, pos:Vector2, rot}
 ## id 必须稳定（同一座房子每次开局都算出来同一个），否则室内家具的随机摆设会变。
@@ -239,6 +241,11 @@ func _ready() -> void:
 	_rebuild_hotbar()
 
 	_setup_touch()
+	survival = SurvivalS.new()
+	survival.world = self
+	survival.name = "Survival"
+	add_child(survival)
+	player.survival_ref = survival
 	_consume_pending_load()
 	_check_auto_shot()
 
@@ -809,6 +816,7 @@ func _apply_sleep(hour: float) -> void:
 	if player != null:
 		player.breath = 1.0
 		player.diving = false
+	if survival != null: survival.heal()
 	if hud != null:
 		var txt := "睡到 %s" % _clock_text(hour)
 		if days > 0:
@@ -1010,6 +1018,9 @@ func _notification(what: int) -> void:
 ## Esc / 返回键的统一处理：从最内层往外一层层退。
 ## 顺序：暂停菜单子面板 → 暂停菜单 → 背包 → 建造模式 → 都没了才开暂停菜单。
 func _back_requested() -> void:
+	if survival != null and survival.ended:
+		return_to_menu()
+		return
 	if trade_panel != null and trade_panel.is_open():
 		trade_panel.close()
 		return
@@ -1093,6 +1104,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 ## 所有游戏动作的唯一入口：键盘与触控按钮共用
 func _do_action(a: String) -> void:
+	if survival != null and not survival.playable(): return
 	if trade_panel != null and trade_panel.is_open():
 		if a in ["esc", "pause", "interact"]: trade_panel.close()
 		return
@@ -1349,7 +1361,9 @@ func _on_pause_speed() -> void:
 
 ## 背包数据源：资源计数（只读快照）
 func _bag_inv() -> Dictionary:
-	return inv
+	var bag := inv.duplicate()
+	bag["__creative"] = is_creative()
+	return bag
 
 
 ## 背包数据源：底部统计行
@@ -1363,8 +1377,9 @@ func _bag_stat() -> String:
 			var h := c as Huntable
 			if h != null and not h.is_dead():
 				alive += 1
-	return "金币 %d · 第 %d 天 · 资源合计 %d · 已建造 %d 座 · 已采集 %d 处 · 野外动物 %d 只" % [
-		coins, dn.day_count, total, built_items.size(), harvested_ids.size(), alive]
+	var resource_text := "资源无限" if is_creative() else "资源合计 %d" % total
+	return "金币 %d · 第 %d 天 · %s · 已建造 %d 座 · 已采集 %d 处 · 野外动物 %d 只" % [
+		coins, dn.day_count, resource_text, built_items.size(), harvested_ids.size(), alive]
 
 
 ## 背包里点某把武器 -> 装备（与物品栏走同一套真值）
@@ -1434,7 +1449,7 @@ func _restore_hotbar_after_build() -> void:
 ## 挥斧头和挖树桩都不成立；而且水下还有动物贴着湖底走的话，
 ## 允许攻击会变成"站在岸上隔水砍湖底的东西"这种更奇怪的画面。
 func _can_act() -> bool:
-	return player == null or not player.swimming
+	return (survival == null or survival.playable()) and (player == null or not player.swimming)
 
 
 func _attack() -> void:
@@ -1456,6 +1471,7 @@ func _attack_at(beast: Huntable) -> void:
 
 	var dmg: int = int(w.get("dmg", 10))
 	var res: Dictionary = beast.take_hit(dmg, player.global_position)
+	if not bool(res.get("dead", false)) and survival != null: survival.provoke(beast)
 	if bool(res.get("dead", false)):
 		hud.toast("猎获！")
 	else:
@@ -1712,6 +1728,7 @@ func _pick_ground(mouse: Vector2) -> Vector3:
 
 
 func _can_afford(cost: Dictionary) -> bool:
+	if is_creative(): return true
 	for k in cost:
 		if int(inv.get(k, 0)) < int(cost[k]):
 			return false
@@ -1745,7 +1762,7 @@ func _try_place_at_mouse() -> void:
 		hud.toast("资源不足")
 		return
 	for k in item.cost:
-		inv[k] = int(inv.get(k, 0)) - int(item.cost[k])
+		if not is_creative(): inv[k] = int(inv.get(k, 0)) - int(item.cost[k])
 	hud.set_resources(inv)
 	var bn := _make_build(item.make)
 	bn.set_meta("player_built", true)
@@ -1923,13 +1940,16 @@ func _build_menu_text() -> String:
 
 # ——————————————— 资源接口（农场模块依赖） ———————————————
 func has_item(kind: String, n: int) -> bool:
-	return int(inv.get(kind, 0)) >= n
+	return n >= 0 and inv.has(kind) and (is_creative() or int(inv.get(kind, 0)) >= n)
+
+func is_creative() -> bool:
+	return survival != null and survival.creative()
 
 
 func take_item(kind: String, n: int) -> bool:
 	if not has_item(kind, n):
 		return false
-	inv[kind] = int(inv.get(kind, 0)) - n
+	if not is_creative(): inv[kind] = int(inv.get(kind, 0)) - n
 	hud.set_resources(inv)
 	return true
 
@@ -1998,6 +2018,7 @@ func restock_shop() -> void:
 	shop_stock_day = day
 
 func trade(kind: String, buying: bool, quantity: int) -> String:
+	if is_creative(): return "创造模式资源无限，无需买卖"
 	if not TradeS.PRICES.has(kind) or quantity not in [1, 10]: return "交易数量或物品无效"
 	if trade_panel == null or not trade_panel.is_open() or trade_panel.speaker != merchant or not can_talk(merchant): return "请到柜台前与老板交易"
 	restock_shop()
@@ -2039,6 +2060,7 @@ func serialize() -> Dictionary:
 	# 室内与户外共用世界坐标，保存实际位置和速度，读档后可以仍站在房间里。
 	return {
 		"inv": inv.duplicate(),
+		"survival": survival.snapshot() if survival != null else {},
 		"coins": coins,
 		"shop_stock": shop_stock.duplicate(),
 		"shop_stock_day": shop_stock_day,
@@ -2102,6 +2124,9 @@ func _deserialize_critters(arr: Variant) -> void:
 
 
 func deserialize(d: Dictionary) -> void:
+	if survival != null and not survival.restore(d.get("survival", {})):
+		hud.toast("该世界已经结束，不能读取或复活")
+		return
 	if trade_panel != null and trade_panel.is_open(): trade_panel.close()
 	# 先清理旧环境标志，恢复坐标、建筑和门后重新根据位置识别室内。
 	# 此处不移动玩家，也不隐藏实际房间。

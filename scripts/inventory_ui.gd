@@ -232,7 +232,7 @@ func refresh() -> void:
 			var kind: String = str(c.kind)
 			var n: int = int(inv.get(kind, 0))
 			var lb: Label = c.label
-			lb.text = "%s\n%d" % [GameHUD.RES_NAME.get(kind, kind), n]
+			lb.text = "%s\n%s" % [GameHUD.RES_NAME.get(kind, kind), "∞" if bool(inv.get("__creative", false)) else str(n)]
 
 	if _get_stat.is_valid():
 		_stat.text = str(_get_stat.call())

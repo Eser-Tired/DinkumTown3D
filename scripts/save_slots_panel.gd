@@ -180,7 +180,7 @@ func set_ui_scale(k: float) -> void:
 	for i in _slot_btns.size():
 		var b: Button = _slot_btns[i]
 		b.custom_minimum_size = BASE_SLOT * k
-		b.add_theme_font_size_override("font_size", U.text_size(BASE_SLOT_FONT, k, 12))
+		b.add_theme_font_size_override("font_size", U.fit_text(b.text, BASE_SLOT_FONT, k, BASE_SLOT * k, 32))
 		var d: Button = _del_btns[i]
 		d.custom_minimum_size = BASE_DEL * k
 		d.add_theme_font_size_override("font_size", U.text_size(BASE_DEL_FONT, k, 11))
@@ -218,7 +218,7 @@ func refresh() -> void:
 		var b: Button = _slot_btns[i]
 		var has := sv.has_save(i)
 		b.text = sv.slot_text(i)
-		b.disabled = not has
+		b.disabled = not has or not sv.can_load(i)
 		var d: Button = _del_btns[i]
 		d.disabled = not has
 

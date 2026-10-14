@@ -117,6 +117,7 @@ func refresh() -> void:
 	world.restock_shop()
 	title.text = speaker.display_name
 	greeting.text = "欢迎来杂货铺！木材、石料和野外收获都能换金币。选好数量后直接买入或卖出。" if speaker.merchant else "我住在附近，平时在家门前散步。采集物可以拿到杂货铺卖给老板，也可以留着建造。"
+	if speaker.merchant and world.is_creative(): greeting.text = "创造模式资源无限，无需采购或出售。切回生存模式后，恢复原有资源和金币。"
 	balance.text = "金币：%d" % world.coins
 	balance.visible = speaker.merchant
 	notice.visible = speaker.merchant
@@ -132,6 +133,9 @@ func refresh() -> void:
 		row.sell.text = "卖出 %d 金" % (int(PRICES[kind][1]) * quantity)
 		row.buy.disabled = world.coins < int(PRICES[kind][0]) * quantity or int(world.shop_stock.get(kind, 0)) < quantity
 		row.sell.disabled = int(world.inv.get(kind, 0)) < quantity
+		if world.is_creative():
+			row.buy.disabled = true
+			row.sell.disabled = true
 	_layout()
 func _request(kind: String, buying: bool) -> void:
 	notice.text = world.trade(kind, buying, quantity)

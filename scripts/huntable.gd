@@ -32,6 +32,7 @@ var drop_table := {}
 
 ## 受击时把模型整体短暂染红（用 modulate 影响所有子 MeshInstance3D）
 var _hurt_flash := 0.0
+var retaliate_time := 0.0
 
 ## 命中盒半径（供 main 的射线/近邻判定用，比模型尺寸略宽松）
 var hit_radius := 1.0
@@ -96,6 +97,8 @@ func _die() -> void:
 
 
 func _process(dt: float) -> void:
+	retaliate_time = maxf(0, retaliate_time - dt)
+	threat_active = retaliate_time > 0 and not dead
 	if _hurt_flash > 0.0:
 		_hurt_flash = maxf(0.0, _hurt_flash - dt * 3.4)
 
@@ -117,6 +120,7 @@ func _process(dt: float) -> void:
 
 
 func _respawn() -> void:
+	retaliate_time = 0
 	dead = false
 	if has_node("AnimalCollision"):
 		get_node("AnimalCollision").collision_layer = 8

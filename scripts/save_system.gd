@@ -15,11 +15,13 @@ class_name SaveSystem
 const SLOTS := 3
 const VERSION := 1
 const SAVE_DIR := "user://saves"
+const SurvivalS := preload("res://scripts/survival.gd")
 
 var _world: Node3D = null
 var _autosave: bool = true
 var _last_info: Dictionary = {}
 var _warned: Dictionary = {}
+var active_slot := 0
 
 
 # ——————————————— 初始化 ———————————————
@@ -94,6 +96,9 @@ func _meta_dict(day: int, season_name: String) -> Dictionary:
 	var seed_val: int = 20260921
 	if GameBus != null:
 		seed_val = int(GameBus.terrain_seed)
+	var vitals := {}
+	if is_instance_valid(_world) and "survival" in _world and _world.survival != null:
+		vitals = _world.survival.snapshot()
 	return {
 		"version": VERSION,
 		"saved_at": Time.get_datetime_string_from_system(true),
@@ -102,6 +107,9 @@ func _meta_dict(day: int, season_name: String) -> Dictionary:
 		# 地图种子必须进元数据：读档时要在地形生成【之前】拿到它，
 		# 而 main 模块的数据要等 load() 完成后才反序列化，那时地形早就建好了。
 		"terrain_seed": seed_val,
+		"mode": str(vitals.get("mode", "normal")),
+		"world_id": str(vitals.get("world_id", "")),
+		"ended": bool(vitals.get("ended", false)),
 	}
 
 
@@ -150,6 +158,7 @@ func save_game(slot: int) -> bool:
 		return false
 	f.store_string(text)
 	f.close()
+	if slot != 0: active_slot = slot
 
 	_last_info = {
 		"slot": slot,
@@ -192,8 +201,16 @@ func _do_load(slot: int) -> bool:
 		_safe_toast("读取失败 · 存档损坏")
 		return false
 	var data: Dictionary = parsed
+	var main_data: Variant = data.get("main", {})
+	var state: Variant = main_data.get("survival", {}) if main_data is Dictionary else {}
+	if state is Dictionary and (bool(state.get("ended", false)) or SurvivalS.is_locked(str(state.get("world_id", "")))):
+		_safe_toast("该世界已结束，不能读取或复活")
+		return false
 
 	var meta_v: Variant = data.get("__meta", {})
+	if meta_v is Dictionary and (bool(meta_v.get("ended",false)) or SurvivalS.is_locked(str(meta_v.get("world_id","")))):
+		_safe_toast("该世界已结束，不能读取或复活")
+		return false
 	var version: int = 0
 	if meta_v is Dictionary:
 		version = int((meta_v as Dictionary).get("version", 0))
@@ -204,6 +221,10 @@ func _do_load(slot: int) -> bool:
 	var rest: Dictionary = data.duplicate(true)
 	rest.erase("__meta")
 	GameBus.deserialize_all(rest)
+	active_slot = slot
+	# 首次迁移旧档立即写回世界ID，之后再读同一文件仍是同一世界，不能重新生成身份。
+	if state is Dictionary and not SurvivalS.valid_id(str(state.get("world_id",""))) and is_instance_valid(_world) and "survival" in _world and _world.survival != null:
+		save_game(slot)
 
 	if meta_v is Dictionary:
 		var md: Dictionary = meta_v as Dictionary
@@ -224,6 +245,10 @@ func has_save(slot: int) -> bool:
 	if not _valid_slot(slot):
 		return false
 	return FileAccess.file_exists(save_path(slot))
+
+func can_load(slot: int) -> bool:
+	var meta := _read_meta(slot)
+	return has_save(slot) and not bool(meta.get("ended", false)) and not SurvivalS.is_locked(str(meta.get("world_id", "")))
 
 
 func delete_save(slot: int) -> void:
@@ -255,7 +280,7 @@ func slot_text(slot: int) -> String:
 	var season_name: String = str(m.get("season_name", ""))
 	var stamp: String = _short_time(str(m.get("saved_at", "")))
 
-	var s: String = "%s · 第%d天" % [label, day]
+	var s: String = "%s · %s%s\n第%d天" % [label, SurvivalS.name_of(str(m.get("mode", "normal"))), " · 已结束" if not can_load(slot) else "", day]
 	if season_name != "":
 		s += " · " + season_name
 	if stamp != "":

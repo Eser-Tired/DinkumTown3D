@@ -448,6 +448,9 @@ func _start_new() -> void:
 
 
 func _load_slot(slot: int) -> void:
+	if not _save.can_load(slot):
+		_toast_msg("该世界已结束，无法复活")
+		return
 	if GameBus != null:
 		GameBus.pending_load_slot = slot
 	_fade_to_game()

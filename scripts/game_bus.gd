@@ -18,6 +18,7 @@ signal toast(msg: String)
 # 主界面在主场景加载【之前】写入，main.gd 在 _ready 末尾读取并清零。
 # 取值：-2 = 新游戏（跳过读档）；-1 = 未指定（等同新游戏）；0..SLOTS-1 = 读取对应槽位。
 var pending_load_slot := -1
+var new_game_mode := "normal" # 主菜单只给下一次新世界传模式；不写入全局settings.cfg。
 
 # —— 地图种子 ——
 # 这一局的地形种子（起伏 / 河流走向 / 植被分布全由它派生）。
